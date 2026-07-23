@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <style>
     body {
-      width: 280px;
+      width: 300px;
       margin: 0;
       padding: 16px;
       font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
@@ -41,7 +41,77 @@
       font-weight: 700;
       cursor: pointer;
     }
-    button:hover { background: #1565c0; }
+    button:hover { filter: brightness(0.93); }
+
+    /* 개발자 모드 */
+    .dev {
+      margin-top: 14px;
+      border-top: 1px dashed #ccc;
+      padding-top: 12px;
+    }
+    .dev-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+      font-weight: 700;
+      color: #444;
+    }
+    .dev-header .arrow { transition: transform 0.2s; }
+    .dev-header.open .arrow { transform: rotate(90deg); }
+    .dev-body { margin-top: 12px; display: none; }
+    .dev-body.open { display: block; }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .toggle-row label { font-weight: 700; }
+
+    .field { margin-bottom: 12px; }
+    .field.disabled { opacity: 0.45; pointer-events: none; }
+    .field > .field-label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 700;
+      color: #555;
+    }
+    input[type="time"] {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px 8px;
+      border: 1px solid #bbb;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+    .time-hint { margin-top: 4px; color: #888; font-size: 11px; }
+    .radios label {
+      display: inline-block;
+      margin-right: 10px;
+      font-weight: 400;
+      cursor: pointer;
+    }
+    .checkbox-row label { font-weight: 400; cursor: pointer; }
+
+    .preview-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .preview-grid button { padding: 8px 4px; font-size: 12px; }
+    .btn-checkin { background: #e53935; }
+    .btn-checkout { background: #e53935; }
+    .btn-off { background: #607d8b; grid-column: 1 / -1; }
+    .dev-note {
+      margin-top: 8px;
+      color: #888;
+      font-size: 11px;
+      line-height: 1.5;
+    }
   </style>
 </head>
 <body>
@@ -53,6 +123,55 @@
     <li>18시 전 기록만 있으면 조퇴 처리될 수 있음</li>
   </ul>
   <button id="open-ssafy">SSAFY 출석 페이지 열기</button>
+
+  <div class="dev">
+    <div class="dev-header" id="dev-header">
+      <span>🛠️ 개발자 모드</span>
+      <span class="arrow">▶</span>
+    </div>
+    <div class="dev-body" id="dev-body">
+      <div class="toggle-row">
+        <label for="dev-enabled">개발자 모드 켜기</label>
+        <input type="checkbox" id="dev-enabled" />
+      </div>
+
+      <div class="dev-controls" id="dev-controls">
+        <div class="field" id="field-time">
+          <span class="field-label">가상 시각</span>
+          <input type="time" id="dev-time" value="08:30" />
+          <div class="time-hint">이 시각인 것처럼 강조 로직이 동작합니다.</div>
+        </div>
+
+        <div class="field" id="field-checkin">
+          <span class="field-label">입실 상태</span>
+          <div class="radios">
+            <label><input type="radio" name="checkedIn" value="auto" checked /> 자동 감지</label>
+            <label><input type="radio" name="checkedIn" value="false" /> 입실 전</label>
+            <label><input type="radio" name="checkedIn" value="true" /> 입실 완료</label>
+          </div>
+        </div>
+
+        <div class="field checkbox-row" id="field-weekday">
+          <label><input type="checkbox" id="dev-weekday" /> 주말에도 평일처럼 동작</label>
+        </div>
+
+        <div class="field">
+          <span class="field-label">효과 미리보기 (원클릭)</span>
+          <div class="preview-grid">
+            <button class="btn-checkin" id="preview-checkin">🟥 입실 강조</button>
+            <button class="btn-checkout" id="preview-checkout">🟥 퇴실 강조</button>
+            <button class="btn-off" id="preview-off">⏹ 미리보기 끄기 (실제 상태로)</button>
+          </div>
+        </div>
+
+        <div class="dev-note">
+          ※ SSAFY 페이지(<b>edu.ssafy.com</b>)를 <b>열어둔 탭</b>에서 강조가 나타납니다.
+          페이지를 새로 열었다면 새로고침 후 확인하세요.
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="popup.js"></script>
 </body>
 </html>

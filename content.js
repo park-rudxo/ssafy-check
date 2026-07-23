@@ -11,12 +11,46 @@
   const HIGHLIGHT_CLASS = "ssafy-alert-highlight";
   const BANNER_ID = "ssafy-alert-banner";
 
+  // ── 개발자 모드 설정 ─────────────────────────────────────────────────
+  // popup에서 chrome.storage.local에 저장한 값을 읽어, 시간/입실상태/요일을
+  // 오버라이드해서 실제 시간과 무관하게 강조 효과를 미리 볼 수 있게 한다.
+  //   enabled      : 개발자 모드 on/off
+  //   time         : 가상 현재 시각(분, 0~1439) / null이면 실제 시각 사용
+  //   checkedIn    : "auto" | "true"(입실완료) | "false"(입실전)
+  //   forceWeekday : 주말에도 평일처럼 동작시키기
+  const DEV_DEFAULTS = { enabled: false, time: null, checkedIn: "auto", forceWeekday: false };
+  let dev = { ...DEV_DEFAULTS };
+
+  function loadDevSettings(cb) {
+    try {
+      chrome.storage.local.get("ssafyDev", (data) => {
+        dev = { ...DEV_DEFAULTS, ...(data && data.ssafyDev) };
+        if (cb) cb();
+      });
+    } catch (e) {
+      if (cb) cb();
+    }
+  }
+
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === "local" && changes.ssafyDev) {
+        dev = { ...DEV_DEFAULTS, ...changes.ssafyDev.newValue };
+        update();
+      }
+    });
+  } catch (e) {
+    /* storage API 사용 불가 시 실제 시간 기준으로만 동작 */
+  }
+
   function nowMinutes() {
+    if (dev.enabled && dev.time != null) return dev.time;
     const d = new Date();
     return d.getHours() * 60 + d.getMinutes();
   }
 
   function isWeekday() {
+    if (dev.enabled && dev.forceWeekday) return true;
     const day = new Date().getDay();
     return day >= 1 && day <= 5;
   }
@@ -77,6 +111,8 @@
   }
 
   function isCheckedIn() {
+    if (dev.enabled && dev.checkedIn === "true") return true;
+    if (dev.enabled && dev.checkedIn === "false") return false;
     // "정상 출석" 문구가 보이거나 퇴실 버튼이 있으면 입실한 상태
     return pageHasText(/정상\s*출석/) || !!findCheckOutButton();
   }
@@ -210,13 +246,15 @@
     // 3) 입실 완료 + 18:00 이후 → 오늘 18시 이후 퇴실 클릭 기록이 생길 때까지 강조
     //    (18시 전에 미리 눌러둔 기록만 있으면 조퇴 처리될 수 있으므로 계속 알림)
     if (checkedIn && now >= CHECK_OUT_START_MIN) {
-      if (hasValidCheckoutToday()) {
+      // 개발자 모드에서는 실제 클릭 기록을 무시하고 항상 미리보기를 보여준다.
+      if (!dev.enabled && hasValidCheckoutToday()) {
         hideBanner();
         return;
       }
-      const checkOutBtn = findCheckOutButton();
-      if (checkOutBtn) {
-        highlight(checkOutBtn);
+      // 개발자 모드에서 퇴실 버튼이 화면에 없으면 출석 위젯을 대신 강조한다.
+      const checkOutTarget = findCheckOutButton() || (dev.enabled ? findAttendanceWidget() : null);
+      if (checkOutTarget) {
+        highlight(checkOutTarget);
         showBanner("🚨 18시가 지났습니다! 지금 퇴실 버튼을 누르세요. (18시 이전 기록만으로는 조퇴 처리될 수 있어요)", "danger");
       } else {
         // 퇴실 버튼이 화면에 없으면 상태를 판단할 수 없으므로 배너만 숨김
@@ -230,7 +268,7 @@
   }
 
   // 주기 실행 + DOM 변경 감지
-  update();
+  loadDevSettings(update);
   setInterval(update, 15 * 1000);
 
   let debounce = null;

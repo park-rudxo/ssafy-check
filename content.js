@@ -92,29 +92,39 @@
     return regex.test(text);
   }
 
+  // 텍스트 노드에서 시작해, 지정한 크기 범위를 넘어서기 직전의 적당한
+  // 컨테이너(박스)를 찾아 올라간다. 박스가 엉뚱하게 커지지 않게 한다.
+  function climbToBox(start, minW, minH, maxW, maxH) {
+    let el = start;
+    let best = start;
+    for (let i = 0; i < 8 && el.parentElement; i++) {
+      el = el.parentElement;
+      const r = el.getBoundingClientRect();
+      if (r.width > maxW || r.height > maxH) break;
+      if (r.width >= minW && r.height >= minH) best = el;
+    }
+    return best;
+  }
+
+  // 입실 칸: 입실 전이면 "입실하기", 입실 후면 "정상 출석"이 표시되는
+  // 왼쪽 셀. 퇴실 칸과 같은 크기의 버튼 셀 하나에만 박스가 맞도록 한다.
   function findCheckInButton() {
-    return findClickableByText(/입실\s*(하기|체크)?$/);
+    const el = findClickableByText(/입실\s*(하기|체크)?/) || findClickableByText(/정상\s*출석/);
+    if (!el) return null;
+    // 이미 클릭 가능한 셀이면 그대로, 아니면 셀 크기까지 올라가서 감싼다.
+    if (el.matches && el.matches('button, a, [role="button"], [onclick]')) return el;
+    return climbToBox(el, 50, 50, 240, 240);
   }
 
   function findCheckOutButton() {
     return findClickableByText(/퇴실\s*하기/);
   }
 
-  // 출석 위젯(노란 박스) - 입실 버튼을 못 찾을 때의 대체 강조 대상.
-  // "출석체크" 라벨에서 위로 올라가되, 카드 크기를 넘어서기 직전의
-  // 적당한 크기의 컨테이너를 선택해 박스가 엉뚱하게 커지지 않도록 한다.
+  // 출석 위젯(노란 박스) - 입실/퇴실 셀을 모두 못 찾을 때의 대체 강조 대상.
   function findAttendanceWidget() {
     const label = findClickableByText(/출석체크/);
     if (!label) return null;
-    let el = label;
-    let best = label;
-    for (let i = 0; i < 8 && el.parentElement; i++) {
-      el = el.parentElement;
-      const r = el.getBoundingClientRect();
-      if (r.width > 560 || r.height > 460) break; // 카드보다 커지면 중단
-      if (r.width >= 180 && r.height >= 90) best = el; // 카드다운 크기면 후보 갱신
-    }
-    return best;
+    return climbToBox(label, 180, 90, 560, 460);
   }
 
   function isCheckedIn() {

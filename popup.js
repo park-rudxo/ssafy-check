@@ -90,6 +90,11 @@
 
     document.getElementById("dev-enabled").addEventListener("change", (e) => {
       dev.enabled = e.target.checked;
+      // 개발자 모드를 켤 때 입력창의 가상 시각을 실제 적용 값으로 반영한다.
+      // (그렇지 않으면 time이 null로 남아 실제 시각으로 동작하는 버그가 있었음)
+      if (dev.enabled && dev.time == null) {
+        dev.time = hhmmToMinutes(document.getElementById("dev-time").value);
+      }
       save();
     });
 
@@ -143,6 +148,8 @@
     try {
       chrome.storage.local.get("ssafyDev", (data) => {
         dev = { ...DEV_DEFAULTS, ...(data && data.ssafyDev) };
+        // 켜진 상태인데 time이 비어 있으면 기본 가상 시각으로 채운다.
+        if (dev.enabled && dev.time == null) dev.time = hhmmToMinutes("08:30");
         if (dev.enabled) openDevSection();
         renderStatus();
         renderDevControls();

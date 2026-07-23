@@ -8,7 +8,6 @@
 
   const CHECK_IN_DEADLINE_MIN = 9 * 60; // 09:00
   const CHECK_OUT_START_MIN = 18 * 60; // 18:00
-  const HIGHLIGHT_CLASS = "ssafy-alert-highlight";
   const BANNER_ID = "ssafy-alert-banner";
 
   // ── 개발자 모드 설정 ─────────────────────────────────────────────────
@@ -117,15 +116,70 @@
     return pageHasText(/정상\s*출석/) || !!findCheckOutButton();
   }
 
-  function clearHighlights() {
-    document.querySelectorAll("." + HIGHLIGHT_CLASS).forEach((el) => el.classList.remove(HIGHLIGHT_CLASS));
+  // ── 오버레이 박스 ────────────────────────────────────────────────────
+  // 버튼 요소에 outline만 주면 부모의 overflow에 잘리거나 안 보일 수 있어,
+  // 버튼의 화면 위치에 맞춰 position:fixed 로 별도의 네모 박스를 겹쳐 그린다.
+  const boxes = new Map(); // id -> { el, lbl, target }
+
+  function ensureBox(id, target, tone, label) {
+    if (!target) {
+      removeBox(id);
+      return;
+    }
+    let entry = boxes.get(id);
+    if (!entry) {
+      const el = document.createElement("div");
+      el.className = "ssafy-alert-box";
+      const lbl = document.createElement("div");
+      lbl.className = "ssafy-alert-box-label";
+      el.appendChild(lbl);
+      document.documentElement.appendChild(el);
+      entry = { el, lbl, target };
+      boxes.set(id, entry);
+    }
+    entry.target = target;
+    entry.el.dataset.tone = tone; // "danger" | "warn"
+    entry.lbl.textContent = label || "";
+    entry.lbl.style.display = label ? "block" : "none";
+    positionBox(entry);
   }
 
-  function highlight(el) {
-    if (el && !el.classList.contains(HIGHLIGHT_CLASS)) {
-      el.classList.add(HIGHLIGHT_CLASS);
+  function removeBox(id) {
+    const entry = boxes.get(id);
+    if (entry) {
+      entry.el.remove();
+      boxes.delete(id);
     }
   }
+
+  function positionBox(entry) {
+    const t = entry.target;
+    if (!t || !document.contains(t)) {
+      entry.el.style.display = "none";
+      return;
+    }
+    const r = t.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) {
+      entry.el.style.display = "none";
+      return;
+    }
+    const pad = 6;
+    entry.el.style.display = "block";
+    entry.el.style.top = r.top - pad + "px";
+    entry.el.style.left = r.left - pad + "px";
+    entry.el.style.width = r.width + pad * 2 + "px";
+    entry.el.style.height = r.height + pad * 2 + "px";
+    // 화면 맨 위에 붙어 있으면 라벨을 박스 아래쪽에 표시
+    entry.lbl.dataset.pos = r.top < 34 ? "below" : "above";
+  }
+
+  function positionAll() {
+    boxes.forEach(positionBox);
+  }
+
+  window.addEventListener("scroll", positionAll, true);
+  window.addEventListener("resize", positionAll);
+  setInterval(positionAll, 300);
 
   function showBanner(message, tone) {
     let banner = document.getElementById(BANNER_ID);
@@ -211,10 +265,14 @@
   );
 
   // ── 메인 상태 갱신 루프 ─────────────────────────────────────────────
+  // 입실/퇴실 버튼 위에 항상 네모 박스를 겹쳐 그린다.
+  //  - 입실 박스: 아직 입실 전이면 빨간색으로 표시 (09:00 이전엔 남은 시간 표시)
+  //  - 퇴실 박스: 입실 완료 후 표시. 18:00 전엔 주황색("18시 이후에"),
+  //              18:00 이후엔 빨간색("지금 퇴실")
   function update() {
-    clearHighlights();
-
     if (!isWeekday()) {
+      removeBox("checkin");
+      removeBox("checkout");
       hideBanner();
       return;
     }
@@ -222,49 +280,40 @@
     const now = nowMinutes();
     const checkedIn = isCheckedIn();
 
-    // 1) 입실 전 + 09:00 이전 → 입실 버튼 강조
-    if (!checkedIn && now < CHECK_IN_DEADLINE_MIN) {
+    // ── 입실 박스 ──
+    if (!checkedIn) {
       const target = findCheckInButton() || findAttendanceWidget();
-      highlight(target);
-      const left = minutesLeftText(CHECK_IN_DEADLINE_MIN);
-      showBanner(`🚨 입실 체크를 하세요! 09:00 마감 (${left})`, "danger");
-      return;
-    }
-
-    // 2) 입실 전 + 09:00 이후 → 지각 상태, 그래도 강조
-    if (!checkedIn && now >= CHECK_IN_DEADLINE_MIN) {
-      const target = findCheckInButton() || findAttendanceWidget();
-      if (target) {
-        highlight(target);
-        showBanner("⚠️ 입실 체크가 안 되어 있습니다! 지금 바로 체크하세요.", "danger");
+      if (now < CHECK_IN_DEADLINE_MIN) {
+        const left = minutesLeftText(CHECK_IN_DEADLINE_MIN);
+        ensureBox("checkin", target, "danger", `🚨 입실 체크! 09:00 마감 (${left})`);
+        showBanner(`🚨 입실 체크를 하세요! 09:00 마감 (${left})`, "danger");
       } else {
-        hideBanner();
+        ensureBox("checkin", target, "danger", "⚠️ 입실 체크 안 됨! 지금 체크");
+        showBanner("⚠️ 입실 체크가 안 되어 있습니다! 지금 바로 체크하세요.", "danger");
       }
+      removeBox("checkout");
       return;
     }
 
-    // 3) 입실 완료 + 18:00 이후 → 오늘 18시 이후 퇴실 클릭 기록이 생길 때까지 강조
-    //    (18시 전에 미리 눌러둔 기록만 있으면 조퇴 처리될 수 있으므로 계속 알림)
-    if (checkedIn && now >= CHECK_OUT_START_MIN) {
-      // 개발자 모드에서는 실제 클릭 기록을 무시하고 항상 미리보기를 보여준다.
+    // ── 퇴실 박스 (입실 완료 상태) ──
+    removeBox("checkin");
+    const checkOutTarget = findCheckOutButton() || findAttendanceWidget();
+
+    if (now >= CHECK_OUT_START_MIN) {
+      // 18:00 이후: 아직 유효한 퇴실 기록이 없으면 빨간 박스로 강조
       if (!dev.enabled && hasValidCheckoutToday()) {
+        removeBox("checkout");
         hideBanner();
         return;
       }
-      // 개발자 모드에서 퇴실 버튼이 화면에 없으면 출석 위젯을 대신 강조한다.
-      const checkOutTarget = findCheckOutButton() || (dev.enabled ? findAttendanceWidget() : null);
-      if (checkOutTarget) {
-        highlight(checkOutTarget);
-        showBanner("🚨 18시가 지났습니다! 지금 퇴실 버튼을 누르세요. (18시 이전 기록만으로는 조퇴 처리될 수 있어요)", "danger");
-      } else {
-        // 퇴실 버튼이 화면에 없으면 상태를 판단할 수 없으므로 배너만 숨김
-        hideBanner();
-      }
-      return;
+      ensureBox("checkout", checkOutTarget, "danger", "🚨 지금 퇴실하세요! (18시 이후)");
+      showBanner("🚨 18시가 지났습니다! 지금 퇴실 버튼을 누르세요. (18시 이전 기록만으로는 조퇴 처리될 수 있어요)", "danger");
+    } else {
+      // 18:00 이전: 주황색 안내 박스 (미리 눌러도 되지만 18시 이후 재클릭 필요)
+      const left = minutesLeftText(CHECK_OUT_START_MIN);
+      ensureBox("checkout", checkOutTarget, "warn", `⏳ 퇴실은 18:00 이후에 (${left})`);
+      hideBanner();
     }
-
-    // 4) 입실 완료 + 18:00 이전 → 조용히 대기 (퇴실 클릭 시 안내 토스트만 동작)
-    hideBanner();
   }
 
   // 주기 실행 + DOM 변경 감지

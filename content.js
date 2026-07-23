@@ -116,30 +116,59 @@
     return h > 0 ? `${h}시간 ${m}분 남음` : `${m}분 남음`;
   }
 
-  // ── 18시 이전 퇴실 클릭 가드 (조퇴 방지) ─────────────────────────────
-  let bypassGuard = false;
+  // ── 퇴실 클릭 기록 ───────────────────────────────────────────────────
+  // 퇴실은 미리 눌러도 되지만, 18:00 이후에 누른 기록이 있어야 정상 퇴실로
+  // 인정된다. 클릭 시각을 기록해 두고, 18:00 이후 클릭이 생길 때까지
+  // 퇴실 버튼을 계속 강조한다.
+  const CHECKOUT_KEY = "ssafy-alert-last-checkout";
+
+  function todayStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+
+  function recordCheckoutClick() {
+    try {
+      localStorage.setItem(CHECKOUT_KEY, JSON.stringify({ date: todayStr(), minutes: nowMinutes() }));
+    } catch (e) {
+      /* localStorage 사용 불가 시 무시 */
+    }
+  }
+
+  function hasValidCheckoutToday() {
+    try {
+      const raw = localStorage.getItem(CHECKOUT_KEY);
+      if (!raw) return false;
+      const rec = JSON.parse(raw);
+      return rec.date === todayStr() && rec.minutes >= CHECK_OUT_START_MIN;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function showToast(message) {
+    const old = document.getElementById("ssafy-alert-toast");
+    if (old) old.remove();
+    const toast = document.createElement("div");
+    toast.id = "ssafy-alert-toast";
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 8000);
+  }
 
   document.addEventListener(
     "click",
     (e) => {
-      if (bypassGuard) return;
-      if (nowMinutes() >= CHECK_OUT_START_MIN) return;
-
       const checkOutBtn = findCheckOutButton();
       if (!checkOutBtn) return;
       if (!(e.target instanceof Element)) return;
       if (!checkOutBtn.contains(e.target) && e.target !== checkOutBtn) return;
 
-      const ok = window.confirm(
-        "⚠️ 아직 18:00 이전입니다!\n지금 퇴실하면 조퇴 처리될 수 있어요.\n정말 퇴실하시겠습니까?"
-      );
-      if (!ok) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-      } else {
-        // 사용자가 확인한 경우 이번 클릭은 그대로 통과시킨다.
-        bypassGuard = true;
-        setTimeout(() => (bypassGuard = false), 0);
+      recordCheckoutClick();
+
+      if (nowMinutes() < CHECK_OUT_START_MIN) {
+        // 미리 누르는 것은 막지 않되, 18시 이후에 다시 눌러야 함을 안내
+        showToast("ℹ️ 지금 퇴실을 눌러도 괜찮지만, 18:00 이후에 한 번 더 눌러야 정상 퇴실로 인정됩니다!");
       }
     },
     true
@@ -178,20 +207,25 @@
       return;
     }
 
-    // 3) 입실 완료 + 18:00 이후 + 퇴실 버튼 존재 → 퇴실 버튼 강조
+    // 3) 입실 완료 + 18:00 이후 → 오늘 18시 이후 퇴실 클릭 기록이 생길 때까지 강조
+    //    (18시 전에 미리 눌러둔 기록만 있으면 조퇴 처리될 수 있으므로 계속 알림)
     if (checkedIn && now >= CHECK_OUT_START_MIN) {
+      if (hasValidCheckoutToday()) {
+        hideBanner();
+        return;
+      }
       const checkOutBtn = findCheckOutButton();
       if (checkOutBtn) {
         highlight(checkOutBtn);
-        showBanner("🚨 18시가 지났습니다! 퇴실 버튼을 누르세요.", "danger");
+        showBanner("🚨 18시가 지났습니다! 지금 퇴실 버튼을 누르세요. (18시 이전 기록만으로는 조퇴 처리될 수 있어요)", "danger");
       } else {
-        // 퇴실 버튼이 없으면 이미 퇴실한 것으로 간주
+        // 퇴실 버튼이 화면에 없으면 상태를 판단할 수 없으므로 배너만 숨김
         hideBanner();
       }
       return;
     }
 
-    // 4) 입실 완료 + 18:00 이전 → 조용히 대기 (퇴실 가드만 동작)
+    // 4) 입실 완료 + 18:00 이전 → 조용히 대기 (퇴실 클릭 시 안내 토스트만 동작)
     hideBanner();
   }
 

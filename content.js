@@ -130,8 +130,8 @@
   function isCheckedIn() {
     if (dev.enabled && dev.checkedIn === "true") return true;
     if (dev.enabled && dev.checkedIn === "false") return false;
-    // "정상 출석" 문구가 보이거나 퇴실 버튼이 있으면 입실한 상태
-    return pageHasText(/정상\s*출석/) || !!findCheckOutButton();
+    // 오늘 입실 클릭 기록이 있거나, "정상 출석" 문구/퇴실 버튼이 보이면 입실 완료
+    return hasCheckinToday() || pageHasText(/정상\s*출석/) || !!findCheckOutButton();
   }
 
   // ── 오버레이 박스 ────────────────────────────────────────────────────
@@ -224,10 +224,11 @@
     return h > 0 ? `${h}시간 ${m}분 남음` : `${m}분 남음`;
   }
 
-  // ── 퇴실 클릭 기록 ───────────────────────────────────────────────────
-  // 퇴실은 미리 눌러도 되지만, 18:00 이후에 누른 기록이 있어야 정상 퇴실로
-  // 인정된다. 클릭 시각을 기록해 두고, 18:00 이후 클릭이 생길 때까지
-  // 퇴실 버튼을 계속 강조한다.
+  // ── 입실 / 퇴실 클릭 기록 ─────────────────────────────────────────────
+  //  - 입실: 한 번 누르면(=오늘 입실 완료) 09:00 이전이어도 더 이상 강조하지 않는다.
+  //  - 퇴실: 미리 눌러도 되지만, 18:00 이후에 누른 기록이 있어야 정상 퇴실로
+  //    인정된다. 18:00 이후 클릭이 생길 때까지 계속 강조한다.
+  const CHECKIN_KEY = "ssafy-alert-last-checkin";
   const CHECKOUT_KEY = "ssafy-alert-last-checkout";
 
   function todayStr() {
@@ -235,23 +236,34 @@
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
 
-  function recordCheckoutClick() {
+  function recordClick(key) {
     try {
-      localStorage.setItem(CHECKOUT_KEY, JSON.stringify({ date: todayStr(), minutes: nowMinutes() }));
+      localStorage.setItem(key, JSON.stringify({ date: todayStr(), minutes: nowMinutes() }));
     } catch (e) {
       /* localStorage 사용 불가 시 무시 */
     }
   }
 
-  function hasValidCheckoutToday() {
+  function readRecord(key) {
     try {
-      const raw = localStorage.getItem(CHECKOUT_KEY);
-      if (!raw) return false;
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
       const rec = JSON.parse(raw);
-      return rec.date === todayStr() && rec.minutes >= CHECK_OUT_START_MIN;
+      return rec.date === todayStr() ? rec : null;
     } catch (e) {
-      return false;
+      return null;
     }
+  }
+
+  // 오늘 입실 버튼을 누른 기록이 있으면 입실 완료로 본다.
+  function hasCheckinToday() {
+    return !!readRecord(CHECKIN_KEY);
+  }
+
+  // 오늘 18:00 이후에 퇴실을 누른 기록이 있으면 정상 퇴실로 본다.
+  function hasValidCheckoutToday() {
+    const rec = readRecord(CHECKOUT_KEY);
+    return !!rec && rec.minutes >= CHECK_OUT_START_MIN;
   }
 
   function showToast(message) {
@@ -264,19 +276,32 @@
     setTimeout(() => toast.remove(), 8000);
   }
 
+  function clickedInside(el, target) {
+    return el && target instanceof Element && (el === target || el.contains(target));
+  }
+
   document.addEventListener(
     "click",
     (e) => {
-      const checkOutBtn = findCheckOutButton();
-      if (!checkOutBtn) return;
       if (!(e.target instanceof Element)) return;
-      if (!checkOutBtn.contains(e.target) && e.target !== checkOutBtn) return;
 
-      recordCheckoutClick();
+      // 퇴실 버튼 클릭
+      const checkOutBtn = findCheckOutButton();
+      if (clickedInside(checkOutBtn, e.target)) {
+        recordClick(CHECKOUT_KEY);
+        if (nowMinutes() < CHECK_OUT_START_MIN) {
+          // 미리 누르는 것은 막지 않되, 18시 이후에 다시 눌러야 함을 안내
+          showToast("ℹ️ 지금 퇴실을 눌러도 괜찮지만, 18:00 이후에 한 번 더 눌러야 정상 퇴실로 인정됩니다!");
+        }
+        update();
+        return;
+      }
 
-      if (nowMinutes() < CHECK_OUT_START_MIN) {
-        // 미리 누르는 것은 막지 않되, 18시 이후에 다시 눌러야 함을 안내
-        showToast("ℹ️ 지금 퇴실을 눌러도 괜찮지만, 18:00 이후에 한 번 더 눌러야 정상 퇴실로 인정됩니다!");
+      // 입실 버튼 클릭 (입실 완료로 기록 → 이후 입실 강조 중단)
+      const checkInBtn = findCheckInButton();
+      if (clickedInside(checkInBtn, e.target)) {
+        recordClick(CHECKIN_KEY);
+        update();
       }
     },
     true

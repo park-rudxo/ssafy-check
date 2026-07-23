@@ -100,13 +100,21 @@
     return findClickableByText(/퇴실\s*하기/);
   }
 
-  // 출석 위젯(노란 박스) - 버튼을 못 찾을 때의 대체 강조 대상
+  // 출석 위젯(노란 박스) - 입실 버튼을 못 찾을 때의 대체 강조 대상.
+  // "출석체크" 라벨에서 위로 올라가되, 카드 크기를 넘어서기 직전의
+  // 적당한 크기의 컨테이너를 선택해 박스가 엉뚱하게 커지지 않도록 한다.
   function findAttendanceWidget() {
     const label = findClickableByText(/출석체크/);
     if (!label) return null;
     let el = label;
-    for (let i = 0; i < 6 && el.parentElement; i++) el = el.parentElement;
-    return el;
+    let best = label;
+    for (let i = 0; i < 8 && el.parentElement; i++) {
+      el = el.parentElement;
+      const r = el.getBoundingClientRect();
+      if (r.width > 560 || r.height > 460) break; // 카드보다 커지면 중단
+      if (r.width >= 180 && r.height >= 90) best = el; // 카드다운 크기면 후보 갱신
+    }
+    return best;
   }
 
   function isCheckedIn() {

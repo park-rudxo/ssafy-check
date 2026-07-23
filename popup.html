@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    body {
+      width: 280px;
+      margin: 0;
+      padding: 16px;
+      font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+      font-size: 13px;
+      color: #222;
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 15px;
+    }
+    .status {
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .status.danger { background: #ffebee; color: #c62828; }
+    .status.ok { background: #e8f5e9; color: #2e7d32; }
+    .status.idle { background: #f5f5f5; color: #555; }
+    ul {
+      margin: 0 0 12px;
+      padding-left: 18px;
+      line-height: 1.7;
+      color: #555;
+    }
+    button {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 8px;
+      background: #1976d2;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:hover { background: #1565c0; }
+  </style>
+</head>
+<body>
+  <h1>⏰ SSAFY 출석 체크 알리미</h1>
+  <div id="status" class="status idle">상태 확인 중...</div>
+  <ul>
+    <li>입실: <b>09:00 이전</b> 필수 (08:59까지)</li>
+    <li>퇴실: <b>18:00 이후 클릭 기록</b>이 있어야 인정</li>
+    <li>18시 전 기록만 있으면 조퇴 처리될 수 있음</li>
+  </ul>
+  <button id="open-ssafy">SSAFY 출석 페이지 열기</button>
+  <script src="popup.js"></script>
+</body>
+</html>

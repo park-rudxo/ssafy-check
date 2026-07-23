@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "SSAFY 출석 체크 알리미",
+  "version": "1.0.0",
+  "description": "SSAFY 입실(09:00 전)·퇴실(18:00 이후) 체크를 놓치지 않도록 버튼을 빨간 사각형으로 강조하고 알림을 보내줍니다.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": ["alarms", "notifications"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://edu.ssafy.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "SSAFY 출석 체크 알리미"
+  }
+}

@@ -1,0 +1,75 @@
+/* 빨간 사각형 강조 (깜빡임 효과) */
+.ssafy-alert-highlight {
+  outline: 4px solid #e53935 !important;
+  outline-offset: 3px !important;
+  border-radius: 4px;
+  animation: ssafy-alert-pulse 1s ease-in-out infinite !important;
+  position: relative;
+  z-index: 9999;
+}
+
+@keyframes ssafy-alert-pulse {
+  0%, 100% {
+    outline-color: #e53935;
+    box-shadow: 0 0 0 0 rgba(229, 57, 53, 0.55);
+  }
+  50% {
+    outline-color: #ff1744;
+    box-shadow: 0 0 0 10px rgba(229, 57, 53, 0);
+  }
+}
+
+/* 상단 경고 배너 */
+#ssafy-alert-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2147483647;
+  display: none;
+  padding: 12px 20px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+#ssafy-alert-banner[data-tone="danger"] {
+  background: #e53935;
+  animation: ssafy-banner-blink 1.2s ease-in-out infinite;
+}
+
+#ssafy-alert-banner[data-tone="warn"] {
+  background: #fb8c00;
+}
+
+@keyframes ssafy-banner-blink {
+  0%, 100% { background: #e53935; }
+  50% { background: #b71c1c; }
+}
+
+/* 안내 토스트 (18시 이전 퇴실 클릭 시) */
+#ssafy-alert-toast {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  max-width: 90vw;
+  padding: 14px 22px;
+  border-radius: 10px;
+  background: #263238;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  animation: ssafy-toast-in 0.3s ease-out;
+}
+
+@keyframes ssafy-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(16px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}

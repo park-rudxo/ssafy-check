@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SSAFY 출석 체크 알리미",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "SSAFY 입실(09:00 전)·퇴실(18:00 이후) 체크를 놓치지 않도록 버튼을 빨간 사각형으로 강조하고 알림을 보내줍니다.",
   "icons": {
     "16": "icons/icon16.png",
@@ -9,6 +9,7 @@
     "128": "icons/icon128.png"
   },
   "permissions": ["alarms", "notifications", "storage"],
+  "host_permissions": ["https://api.github.com/*"],
   "background": {
     "service_worker": "background.js"
   },

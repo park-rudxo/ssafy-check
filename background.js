@@ -7,8 +7,16 @@
 const REPO = "park-rudxo/ssafy-check";
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 const RELEASES_PAGE = `https://github.com/${REPO}/releases`;
+const SSAFY_HOME = "https://edu.ssafy.com/edu/main/index.do";
 const UPDATE_ALARM = "ssafy-update-check";
 const UPDATE_NOTI_ID = "ssafy-update";
+
+// 입실/퇴실 N분 전에 SSAFY 홈을 자동으로 여는 알람
+const OPEN_CHECKIN_ALARM = "ssafy-open-checkin";
+const OPEN_CHECKOUT_ALARM = "ssafy-open-checkout";
+const CHECK_IN_MIN = 9 * 60; // 09:00
+const CHECK_OUT_MIN = 18 * 60; // 18:00
+const DEFAULT_AUTO_OPEN = { enabled: true, minutesBefore: 5 };
 
 const REMINDERS = [
   { name: "ssafy-checkin", hour: 8, minute: 50, title: "SSAFY 입실 체크!", message: "09:00 전에 입실 체크하세요. (10분 남음)" },
@@ -22,6 +30,10 @@ function nextOccurrence(hour, minute) {
   return next.getTime();
 }
 
+function nextOccurrenceFromMinutes(totalMin) {
+  return nextOccurrence(Math.floor(totalMin / 60), totalMin % 60);
+}
+
 function scheduleAll() {
   for (const r of REMINDERS) {
     chrome.alarms.create(r.name, {
@@ -31,7 +43,38 @@ function scheduleAll() {
   }
   // 6시간마다 새 공지(Release) 확인
   chrome.alarms.create(UPDATE_ALARM, { delayInMinutes: 1, periodInMinutes: 360 });
+  scheduleAutoOpen();
 }
+
+// ── 입실/퇴실 N분 전 자동 열기 ────────────────────────────────────────
+async function getAutoOpen() {
+  const { autoOpen } = await chrome.storage.local.get("autoOpen");
+  const s = { ...DEFAULT_AUTO_OPEN, ...(autoOpen || {}) };
+  // 0~120분 범위로 보정
+  s.minutesBefore = Math.max(0, Math.min(120, parseInt(s.minutesBefore, 10) || 0));
+  return s;
+}
+
+async function scheduleAutoOpen() {
+  await chrome.alarms.clear(OPEN_CHECKIN_ALARM);
+  await chrome.alarms.clear(OPEN_CHECKOUT_ALARM);
+  const s = await getAutoOpen();
+  if (!s.enabled) return;
+  const n = s.minutesBefore;
+  chrome.alarms.create(OPEN_CHECKIN_ALARM, {
+    when: nextOccurrenceFromMinutes(CHECK_IN_MIN - n),
+    periodInMinutes: 24 * 60,
+  });
+  chrome.alarms.create(OPEN_CHECKOUT_ALARM, {
+    when: nextOccurrenceFromMinutes(CHECK_OUT_MIN - n),
+    periodInMinutes: 24 * 60,
+  });
+}
+
+// 설정(autoOpen)이 바뀌면 자동 열기 알람을 다시 예약한다.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.autoOpen) scheduleAutoOpen();
+});
 
 chrome.runtime.onInstalled.addListener(async () => {
   scheduleAll();
@@ -47,6 +90,14 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === UPDATE_ALARM) {
     checkAnnouncement(false);
+    return;
+  }
+
+  // 입실/퇴실 N분 전 → SSAFY 홈 자동 열기 (평일만)
+  if (alarm.name === OPEN_CHECKIN_ALARM || alarm.name === OPEN_CHECKOUT_ALARM) {
+    const day = new Date().getDay();
+    if (day === 0 || day === 6) return;
+    chrome.tabs.create({ url: SSAFY_HOME });
     return;
   }
 

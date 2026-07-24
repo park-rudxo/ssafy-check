@@ -177,7 +177,8 @@
       const head = res.isNew ? `🆕 새 공지: ${escapeHtml(title)}` : `📢 최신 공지: ${escapeHtml(title)}`;
       statusEl.innerHTML =
         `${head}${notesHtml}` +
-        `<div><a href="${res.url}" target="_blank">다운로드 / 자세히 보기</a></div>`;
+        `<div class="pull-hint">업데이트: <code>git pull</code> 후 확장 새로고침(🔄)</div>` +
+        `<div><a href="${res.url}" target="_blank">릴리스 노트 자세히 보기</a></div>`;
     });
   }
 

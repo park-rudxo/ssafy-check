@@ -127,6 +127,13 @@
     return climbToBox(label, 180, 90, 560, 460);
   }
 
+  // 출석 위젯이 있는 화면(메인/홈)인지 판단한다.
+  // 커리큘럼·로그인 등 다른 화면에는 위젯이 없어 출석 상태를 알 수 없으므로,
+  // 그런 화면에서는 "미입실"로 오판하지 않도록 강조/배너를 표시하지 않는다.
+  function onAttendancePage() {
+    return !!findClickableByText(/출석체크/);
+  }
+
   function isCheckedIn() {
     if (dev.enabled && dev.checkedIn === "true") return true;
     if (dev.enabled && dev.checkedIn === "false") return false;
@@ -313,7 +320,9 @@
   //  - 퇴실 박스: 입실 완료 후 표시. 18:00 전엔 주황색("18시 이후에"),
   //              18:00 이후엔 빨간색("지금 퇴실")
   function update() {
-    if (!isWeekday()) {
+    // 출석 위젯이 없는 화면(커리큘럼·로그인 등)에서는 상태를 알 수 없으므로
+    // 아무것도 표시하지 않는다. (다른 화면에서 "미입실"로 오판하는 문제 방지)
+    if (!isWeekday() || !onAttendancePage()) {
       removeBox("checkin");
       removeBox("checkout");
       hideBanner();

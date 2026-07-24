@@ -163,6 +163,36 @@
       font-size: 11px;
       line-height: 1.5;
     }
+
+    /* 자동 열기 */
+    .autoopen {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #eee;
+    }
+    .autoopen .toggle-row { margin-bottom: 8px; }
+    .autoopen .toggle-row label { font-weight: 700; }
+    .minutes-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #555;
+    }
+    .minutes-row.disabled { opacity: 0.45; pointer-events: none; }
+    .minutes-row input {
+      width: 56px;
+      padding: 5px 8px;
+      border: 1px solid #bbb;
+      border-radius: 6px;
+      font-size: 13px;
+      text-align: center;
+    }
+    .autoopen-note {
+      margin-top: 8px;
+      color: #888;
+      font-size: 11px;
+      line-height: 1.5;
+    }
   </style>
 </head>
 <body>
@@ -174,6 +204,19 @@
     <li>18시 전 기록만 있으면 조퇴 처리될 수 있음</li>
   </ul>
   <button id="open-ssafy">SSAFY 출석 페이지 열기</button>
+
+  <div class="autoopen">
+    <div class="toggle-row">
+      <label for="auto-open-enabled">⏱️ 입실·퇴실 전 홈 자동 열기</label>
+      <input type="checkbox" id="auto-open-enabled" />
+    </div>
+    <div class="minutes-row" id="minutes-row">
+      <span>입실(09:00)·퇴실(18:00)</span>
+      <input type="number" id="auto-open-minutes" min="0" max="120" value="5" />
+      <span>분 전에 자동으로 열기</span>
+    </div>
+    <div class="autoopen-note">평일에만 동작하며, 크롬이 실행 중이어야 해요.</div>
+  </div>
 
   <div class="update">
     <div class="update-row">

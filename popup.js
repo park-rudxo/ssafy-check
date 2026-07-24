@@ -3,6 +3,9 @@
   const DEV_DEFAULTS = { enabled: false, time: null, checkedIn: "auto", forceWeekday: false };
   let dev = { ...DEV_DEFAULTS };
 
+  const AUTO_OPEN_DEFAULTS = { enabled: true, minutesBefore: 5 };
+  let autoOpen = { ...AUTO_OPEN_DEFAULTS };
+
   // ── 시간 변환 유틸 ─────────────────────────────────────────────────
   function hhmmToMinutes(str) {
     const m = /^(\d{1,2}):(\d{2})$/.exec(str || "");
@@ -74,6 +77,21 @@
     }
   }
 
+  // ── 자동 열기 ──────────────────────────────────────────────────────
+  function renderAutoOpen() {
+    document.getElementById("auto-open-enabled").checked = autoOpen.enabled;
+    document.getElementById("auto-open-minutes").value = autoOpen.minutesBefore;
+    document.getElementById("minutes-row").classList.toggle("disabled", !autoOpen.enabled);
+  }
+
+  function saveAutoOpen() {
+    try {
+      chrome.storage.local.set({ autoOpen: autoOpen }, renderAutoOpen);
+    } catch (e) {
+      renderAutoOpen();
+    }
+  }
+
   // ── 이벤트 바인딩 ──────────────────────────────────────────────────
   function bind() {
     // 섹션 펼치기/접기
@@ -89,6 +107,20 @@
     });
 
     document.getElementById("check-update").addEventListener("click", checkUpdate);
+
+    // 자동 열기 설정
+    document.getElementById("auto-open-enabled").addEventListener("change", (e) => {
+      autoOpen.enabled = e.target.checked;
+      saveAutoOpen();
+    });
+    document.getElementById("auto-open-minutes").addEventListener("change", (e) => {
+      let n = parseInt(e.target.value, 10);
+      if (isNaN(n)) n = 5;
+      n = Math.max(0, Math.min(120, n));
+      e.target.value = n;
+      autoOpen.minutesBefore = n;
+      saveAutoOpen();
+    });
 
     document.getElementById("dev-enabled").addEventListener("change", (e) => {
       dev.enabled = e.target.checked;
@@ -201,17 +233,20 @@
       document.getElementById("version-label").textContent = "";
     }
     try {
-      chrome.storage.local.get("ssafyDev", (data) => {
+      chrome.storage.local.get(["ssafyDev", "autoOpen"], (data) => {
         dev = { ...DEV_DEFAULTS, ...(data && data.ssafyDev) };
         // 켜진 상태인데 time이 비어 있으면 기본 가상 시각으로 채운다.
         if (dev.enabled && dev.time == null) dev.time = hhmmToMinutes("08:30");
         if (dev.enabled) openDevSection();
+        autoOpen = { ...AUTO_OPEN_DEFAULTS, ...(data && data.autoOpen) };
         renderStatus();
         renderDevControls();
+        renderAutoOpen();
       });
     } catch (e) {
       renderStatus();
       renderDevControls();
+      renderAutoOpen();
     }
   }
 

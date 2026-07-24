@@ -1,7 +1,8 @@
 // SSAFY 출석 체크 알리미 - 백그라운드 서비스 워커
 //  1) 평일 08:50(입실), 18:00(퇴실) 리마인더 알림
-//  2) GitHub의 최신 Release를 주기적으로 확인해, 설치된 버전보다 높으면
-//     "새 버전 나왔어요" 업데이트 알림을 띄운다. (배포는 GitHub Release 발행으로 제어)
+//  2) GitHub Release '공지' 전달: 관리자가 Release를 발행(=배포)하면서 쓴
+//     릴리즈 노트가, 사용자에게 크롬 알림으로 그대로 전달된다.
+//     (버전 숫자 비교가 아니라, "새 Release가 올라왔는지"로 판단)
 
 const REPO = "park-rudxo/ssafy-check";
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
@@ -28,22 +29,24 @@ function scheduleAll() {
       periodInMinutes: 24 * 60,
     });
   }
-  // 6시간마다 업데이트 확인
+  // 6시간마다 새 공지(Release) 확인
   chrome.alarms.create(UPDATE_ALARM, { delayInMinutes: 1, periodInMinutes: 360 });
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(async () => {
   scheduleAll();
-  checkForUpdate(false);
+  // 설치/업데이트 직후에는 "현재 최신 Release"를 이미 본 것으로 기준을 잡아
+  // 방금 설치한 사용자에게 곧바로 알림이 뜨지 않도록 한다.
+  await setBaselineIfNeeded();
 });
 chrome.runtime.onStartup.addListener(() => {
   scheduleAll();
-  checkForUpdate(false);
+  checkAnnouncement(false);
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === UPDATE_ALARM) {
-    checkForUpdate(false);
+    checkAnnouncement(false);
     return;
   }
 
@@ -64,7 +67,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   });
 });
 
-// 알림 클릭 처리: 업데이트 알림이면 릴리스 페이지, 그 외엔 출석 페이지
+// 알림 클릭 처리: 공지 알림이면 릴리스 페이지, 그 외엔 출석 페이지
 chrome.notifications.onClicked.addListener(async (notificationId) => {
   if (notificationId === UPDATE_NOTI_ID) {
     const { latestReleaseUrl } = await chrome.storage.local.get("latestReleaseUrl");
@@ -75,64 +78,74 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
   chrome.notifications.clear(notificationId);
 });
 
-// ── 업데이트 확인 ────────────────────────────────────────────────────
-function parseVersion(v) {
-  return String(v || "").replace(/^v/i, "").split(".").map((n) => parseInt(n, 10) || 0);
+// ── GitHub Release 공지 확인 ──────────────────────────────────────────
+function truncate(str, n) {
+  const s = String(str || "").trim();
+  return s.length > n ? s.slice(0, n) + "…" : s;
 }
 
-// a가 b보다 높은 버전이면 true
-function isNewer(a, b) {
-  const pa = parseVersion(a);
-  const pb = parseVersion(b);
-  const len = Math.max(pa.length, pb.length);
-  for (let i = 0; i < len; i++) {
-    const x = pa[i] || 0;
-    const y = pb[i] || 0;
-    if (x > y) return true;
-    if (x < y) return false;
-  }
-  return false;
-}
-
-// manual=true 이면 (동일 버전 알림 여부와 무관하게) 결과를 반환한다.
-async function checkForUpdate(manual) {
-  const current = chrome.runtime.getManifest().version;
+// 최신 Release 정보를 가져온다. 발행된 Release가 없으면 { none: true }.
+async function fetchLatestRelease() {
   try {
     const res = await fetch(RELEASES_API, { headers: { Accept: "application/vnd.github+json" } });
-    if (!res.ok) return { ok: false, current, error: `GitHub 응답 오류 (${res.status})` };
-
-    const data = await res.json();
-    const latest = String(data.tag_name || "").replace(/^v/i, "");
-    const url = data.html_url || RELEASES_PAGE;
-    const hasUpdate = !!latest && isNewer(latest, current);
-
-    if (hasUpdate) {
-      await chrome.storage.local.set({ latestReleaseUrl: url });
-      const { lastNotifiedVersion } = await chrome.storage.local.get("lastNotifiedVersion");
-      // 자동 확인 시에는 같은 버전을 중복 알림하지 않는다.
-      if (manual || lastNotifiedVersion !== latest) {
-        chrome.notifications.create(UPDATE_NOTI_ID, {
-          type: "basic",
-          iconUrl: "icons/icon128.png",
-          title: "SSAFY 출석 알리미 새 버전!",
-          message: `v${latest}이(가) 나왔어요. 클릭해서 업데이트하세요. (현재 v${current})`,
-          priority: 2,
-          requireInteraction: true,
-        });
-        await chrome.storage.local.set({ lastNotifiedVersion: latest });
-      }
-    }
-
-    return { ok: true, current, latest: latest || current, url, hasUpdate };
+    if (res.status === 404) return { none: true }; // 아직 발행된 Release 없음
+    if (!res.ok) return { error: `GitHub 응답 오류 (${res.status})` };
+    const d = await res.json();
+    return {
+      id: d.id,
+      tag: d.tag_name || "",
+      name: d.name || d.tag_name || "새 업데이트",
+      body: d.body || "",
+      url: d.html_url || RELEASES_PAGE,
+    };
   } catch (e) {
-    return { ok: false, current, error: String(e && e.message ? e.message : e) };
+    return { error: String(e && e.message ? e.message : e) };
   }
+}
+
+// 설치 직후 기준선 설정: 아직 본 Release 기록이 없으면 현재 최신을 본 것으로 저장
+// (단, 발행된 Release가 아예 없으면 기록하지 않아, 첫 Release 때 알림이 가게 한다.)
+async function setBaselineIfNeeded() {
+  const { lastSeenReleaseId } = await chrome.storage.local.get("lastSeenReleaseId");
+  if (lastSeenReleaseId !== undefined) return;
+  const rel = await fetchLatestRelease();
+  if (rel && rel.id) {
+    await chrome.storage.local.set({ lastSeenReleaseId: rel.id, latestReleaseUrl: rel.url });
+  }
+}
+
+// manual=false(자동): 새 공지면 크롬 알림을 띄우고 '본 것'으로 기록.
+// manual=true(팝업 버튼): 알림 없이 최신 공지 내용을 반환하고 '본 것'으로 기록.
+async function checkAnnouncement(manual) {
+  const rel = await fetchLatestRelease();
+  if (rel.none) return { ok: true, none: true };
+  if (rel.error) return { ok: false, error: rel.error };
+
+  await chrome.storage.local.set({ latestReleaseUrl: rel.url });
+  const { lastSeenReleaseId } = await chrome.storage.local.get("lastSeenReleaseId");
+  const isNew = lastSeenReleaseId !== rel.id;
+
+  if (isNew && !manual) {
+    chrome.notifications.create(UPDATE_NOTI_ID, {
+      type: "basic",
+      iconUrl: "icons/icon128.png",
+      title: `📢 ${rel.name}`,
+      message: truncate(rel.body, 200) || "새 업데이트가 배포되었어요. 클릭해서 확인하세요.",
+      priority: 2,
+      requireInteraction: true,
+    });
+  }
+
+  // 자동이든 수동이든, 확인했으면 최신을 본 것으로 기록한다.
+  await chrome.storage.local.set({ lastSeenReleaseId: rel.id });
+
+  return { ok: true, none: false, isNew, name: rel.name, tag: rel.tag, body: rel.body, url: rel.url };
 }
 
 // 팝업의 "업데이트 확인" 버튼 요청 처리
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === "checkUpdate") {
-    checkForUpdate(true).then(sendResponse);
+    checkAnnouncement(true).then(sendResponse);
     return true; // 비동기 응답
   }
 });

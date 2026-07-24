@@ -164,16 +164,29 @@
         statusEl.textContent = "확인 실패: " + (res.error || "알 수 없는 오류");
         return;
       }
-      if (res.hasUpdate) {
-        statusEl.className = "update-status has-update";
-        statusEl.innerHTML =
-          `🆕 새 버전 v${res.latest}이(가) 있어요! ` +
-          `<a href="${res.url}" target="_blank">다운로드 페이지 열기</a>`;
-      } else {
+      if (res.none) {
         statusEl.className = "update-status ok";
-        statusEl.textContent = "✅ 최신 버전을 사용 중이에요.";
+        statusEl.textContent = "아직 배포된 공지가 없어요.";
+        return;
       }
+      // 최신 Release(공지) 표시
+      const title = res.name || res.tag || "새 업데이트";
+      const notes = (res.body || "").trim();
+      const notesHtml = notes ? `<div class="notes">${escapeHtml(notes)}</div>` : "";
+      statusEl.className = "update-status " + (res.isNew ? "has-update" : "ok");
+      const head = res.isNew ? `🆕 새 공지: ${escapeHtml(title)}` : `📢 최신 공지: ${escapeHtml(title)}`;
+      statusEl.innerHTML =
+        `${head}${notesHtml}` +
+        `<div><a href="${res.url}" target="_blank">다운로드 / 자세히 보기</a></div>`;
     });
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\n/g, "<br>");
   }
 
   // ── 초기화 ─────────────────────────────────────────────────────────

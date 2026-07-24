@@ -88,6 +88,8 @@
       chrome.tabs.create({ url: "https://edu.ssafy.com/edu/main/index.do" });
     });
 
+    document.getElementById("check-update").addEventListener("click", checkUpdate);
+
     document.getElementById("dev-enabled").addEventListener("change", (e) => {
       dev.enabled = e.target.checked;
       // 개발자 모드를 켤 때 입력창의 가상 시각을 실제 적용 값으로 반영한다.
@@ -142,9 +144,48 @@
     document.getElementById("dev-header").classList.add("open");
   }
 
+  // ── 업데이트 확인 ──────────────────────────────────────────────────
+  function checkUpdate() {
+    const statusEl = document.getElementById("update-status");
+    const btn = document.getElementById("check-update");
+    statusEl.className = "update-status";
+    statusEl.textContent = "확인 중...";
+    btn.disabled = true;
+
+    chrome.runtime.sendMessage({ type: "checkUpdate" }, (res) => {
+      btn.disabled = false;
+      if (chrome.runtime.lastError || !res) {
+        statusEl.className = "update-status err";
+        statusEl.textContent = "확인 실패. 잠시 후 다시 시도해주세요.";
+        return;
+      }
+      if (!res.ok) {
+        statusEl.className = "update-status err";
+        statusEl.textContent = "확인 실패: " + (res.error || "알 수 없는 오류");
+        return;
+      }
+      if (res.hasUpdate) {
+        statusEl.className = "update-status has-update";
+        statusEl.innerHTML =
+          `🆕 새 버전 v${res.latest}이(가) 있어요! ` +
+          `<a href="${res.url}" target="_blank">다운로드 페이지 열기</a>`;
+      } else {
+        statusEl.className = "update-status ok";
+        statusEl.textContent = "✅ 최신 버전을 사용 중이에요.";
+      }
+    });
+  }
+
   // ── 초기화 ─────────────────────────────────────────────────────────
   function init() {
     bind();
+    // 현재 버전 표시
+    try {
+      const v = chrome.runtime.getManifest().version;
+      document.getElementById("version-label").textContent = "현재 버전 v" + v;
+    } catch (e) {
+      document.getElementById("version-label").textContent = "";
+    }
     try {
       chrome.storage.local.get("ssafyDev", (data) => {
         dev = { ...DEV_DEFAULTS, ...(data && data.ssafyDev) };

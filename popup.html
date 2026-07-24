@@ -43,6 +43,35 @@
     }
     button:hover { filter: brightness(0.93); }
 
+    /* 업데이트 확인 */
+    .update {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #eee;
+    }
+    .update-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    #version-label { color: #666; font-weight: 700; }
+    .btn-small {
+      width: auto;
+      padding: 6px 12px;
+      font-size: 12px;
+      background: #455a64;
+    }
+    .update-status {
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .update-status a { color: #1976d2; font-weight: 700; }
+    .update-status.has-update { color: #c62828; font-weight: 700; }
+    .update-status.ok { color: #2e7d32; }
+    .update-status.err { color: #b71c1c; }
+
     /* 개발자 모드 */
     .dev {
       margin-top: 14px;
@@ -123,6 +152,14 @@
     <li>18시 전 기록만 있으면 조퇴 처리될 수 있음</li>
   </ul>
   <button id="open-ssafy">SSAFY 출석 페이지 열기</button>
+
+  <div class="update">
+    <div class="update-row">
+      <span id="version-label">버전 확인 중...</span>
+      <button id="check-update" class="btn-small">업데이트 확인</button>
+    </div>
+    <div id="update-status" class="update-status"></div>
+  </div>
 
   <div class="dev">
     <div class="dev-header" id="dev-header">

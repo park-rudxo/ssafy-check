@@ -126,11 +126,13 @@ async function checkAnnouncement(manual) {
   const isNew = lastSeenReleaseId !== rel.id;
 
   if (isNew && !manual) {
+    const pullHint = "▶ git pull 후 확장 새로고침(🔄) 하세요";
+    const notes = truncate(rel.body, 160);
     chrome.notifications.create(UPDATE_NOTI_ID, {
       type: "basic",
       iconUrl: "icons/icon128.png",
       title: `📢 ${rel.name}`,
-      message: truncate(rel.body, 200) || "새 업데이트가 배포되었어요. 클릭해서 확인하세요.",
+      message: notes ? `${notes}\n\n${pullHint}` : `새 버전이 배포됐어요!\n${pullHint}`,
       priority: 2,
       requireInteraction: true,
     });

@@ -137,8 +137,14 @@
   function isCheckedIn() {
     if (dev.enabled && dev.checkedIn === "true") return true;
     if (dev.enabled && dev.checkedIn === "false") return false;
-    // 오늘 입실 클릭 기록이 있거나, "정상 출석" 문구/퇴실 버튼이 보이면 입실 완료
-    return hasCheckinToday() || pageHasText(/정상\s*출석/) || !!findCheckOutButton();
+    // 오늘 입실 클릭 기록이 있거나 "정상 출석" 문구가 보이면 입실 완료
+    if (hasCheckinToday() || pageHasText(/정상\s*출석/)) return true;
+    // "입실하기" 문구가 명시적으로 보이면 아직 입실 전이다. 퇴실 버튼은
+    // 입실 전에도 (비활성 상태로) 화면에 존재할 수 있어 판단 기준으로
+    // 쓸 수 없으므로, 입실하기 문구가 우선한다.
+    if (pageHasText(/입실\s*하기/)) return false;
+    // 그 외에는 퇴실 버튼 존재 여부로 추정한다. (최후 수단)
+    return !!findCheckOutButton();
   }
 
   // ── 오버레이 박스 ────────────────────────────────────────────────────

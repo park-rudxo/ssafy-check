@@ -229,12 +229,25 @@
     if (banner) banner.style.display = "none";
   }
 
-  function minutesLeftText(targetMin) {
-    const left = targetMin - nowMinutes();
-    if (left <= 0) return "";
-    const h = Math.floor(left / 60);
-    const m = left % 60;
-    return h > 0 ? `${h}시간 ${m}분 남음` : `${m}분 남음`;
+  // 자정 기준 밀리초. 개발자 모드에서 가상 시각이 켜져 있으면 그 시각에
+  // 고정된다(분 단위, 초는 흐르지 않음 - 미리보기용이라 실시간 흐름은 불필요).
+  function nowMs() {
+    if (dev.enabled && dev.time != null) return dev.time * 60000;
+    const d = new Date();
+    return ((d.getHours() * 60 + d.getMinutes()) * 60 + d.getSeconds()) * 1000 + d.getMilliseconds();
+  }
+
+  function secondsLeftText(targetMin) {
+    const leftMs = targetMin * 60000 - nowMs();
+    if (leftMs <= 0) return "";
+    let leftSec = Math.ceil(leftMs / 1000);
+    const h = Math.floor(leftSec / 3600);
+    leftSec %= 3600;
+    const m = Math.floor(leftSec / 60);
+    const s = leftSec % 60;
+    if (h > 0) return `${h}시간 ${m}분 ${s}초 남음`;
+    if (m > 0) return `${m}분 ${s}초 남음`;
+    return `${s}초 남음`;
   }
 
   // ── 입실 / 퇴실 클릭 기록 ─────────────────────────────────────────────
@@ -325,7 +338,13 @@
   //  - 입실 박스: 아직 입실 전이면 빨간색으로 표시 (09:00 이전엔 남은 시간 표시)
   //  - 퇴실 박스: 입실 완료 후 표시. 18:00 전엔 주황색("18시 이후에"),
   //              18:00 이후엔 빨간색("지금 퇴실")
+  // 초 단위 카운트다운이 필요한 상태일 때, 매초 가볍게 갱신하기 위한 정보.
+  // (버튼 재탐색 없이 라벨/배너 텍스트만 다시 그린다)
+  let countdown = null;
+
   function update() {
+    countdown = null;
+
     // 출석 위젯이 없는 화면(커리큘럼·로그인 등)에서는 상태를 알 수 없으므로
     // 아무것도 표시하지 않는다. (다른 화면에서 "미입실"로 오판하는 문제 방지)
     if (!isWeekday() || !onAttendancePage()) {
@@ -342,9 +361,15 @@
     if (!checkedIn) {
       const target = findCheckInButton() || findAttendanceWidget();
       if (now < CHECK_IN_DEADLINE_MIN) {
-        const left = minutesLeftText(CHECK_IN_DEADLINE_MIN);
+        const left = secondsLeftText(CHECK_IN_DEADLINE_MIN);
         ensureBox("checkin", target, "danger", `🚨 입실 체크! 09:00 마감 (${left})`);
         showBanner(`🚨 입실 체크를 하세요! 09:00 마감 (${left})`, "danger");
+        countdown = {
+          boxId: "checkin",
+          targetMin: CHECK_IN_DEADLINE_MIN,
+          renderLabel: (l) => `🚨 입실 체크! 09:00 마감 (${l})`,
+          renderBanner: (l) => `🚨 입실 체크를 하세요! 09:00 마감 (${l})`,
+        };
       } else {
         ensureBox("checkin", target, "danger", "⚠️ 입실 체크 안 됨! 지금 체크");
         showBanner("⚠️ 입실 체크가 안 되어 있습니다! 지금 바로 체크하세요.", "danger");
@@ -368,15 +393,36 @@
       showBanner("🚨 18시가 지났습니다! 지금 퇴실 버튼을 누르세요. (18시 이전 기록만으로는 조퇴 처리될 수 있어요)", "danger");
     } else {
       // 18:00 이전: 주황색 안내 박스 (미리 눌러도 되지만 18시 이후 재클릭 필요)
-      const left = minutesLeftText(CHECK_OUT_START_MIN);
+      const left = secondsLeftText(CHECK_OUT_START_MIN);
       ensureBox("checkout", checkOutTarget, "warn", `⏳ 퇴실은 18:00 이후에 (${left})`);
       hideBanner();
+      countdown = {
+        boxId: "checkout",
+        targetMin: CHECK_OUT_START_MIN,
+        renderLabel: (l) => `⏳ 퇴실은 18:00 이후에 (${l})`,
+        renderBanner: null,
+      };
     }
+  }
+
+  // 버튼 재탐색 없이, 표시 중인 카운트다운의 초만 매초 갱신한다.
+  // 목표 시각을 지나면(=left가 빈 문자열) 전체 재판단(update)을 트리거한다.
+  function tickCountdown() {
+    if (!countdown) return;
+    const left = secondsLeftText(countdown.targetMin);
+    if (!left) {
+      update();
+      return;
+    }
+    const entry = boxes.get(countdown.boxId);
+    if (entry) entry.lbl.textContent = countdown.renderLabel(left);
+    if (countdown.renderBanner) showBanner(countdown.renderBanner(left), "danger");
   }
 
   // 주기 실행 + DOM 변경 감지
   loadDevSettings(update);
   setInterval(update, 15 * 1000);
+  setInterval(tickCountdown, 1000);
 
   let debounce = null;
   const observer = new MutationObserver(() => {

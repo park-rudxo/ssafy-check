@@ -1,9 +1,11 @@
 // SSAFY 출석 체크 알리미 - 백그라운드 서비스 워커
-//  1) 평일 08:50(입실), 18:00(퇴실) 리마인더 알림
-//  2) GitHub Release '공지' 전달: 관리자가 Release를 발행(=배포)하면서 쓴
-//     릴리즈 노트가, 사용자에게 크롬 알림으로 그대로 전달된다.
-//     (버전 숫자 비교가 아니라, "새 Release가 올라왔는지"로 판단)
-//     확인 주기: 매 정각. 단, 평일 09:00~18:00 사이에만 실제로 확인한다.
+// 사용자에게 실제로 알림이 가는 경우는 딱 3가지뿐이다.
+//  1) 평일 08:50 - 입실 10분 전 리마인더
+//  2) 평일 17:50 - 퇴실 10분 전 리마인더
+//  3) 새 GitHub Release가 발행됐을 때 - 그 릴리즈 노트를 그대로 알림으로 전달
+//     (버전 숫자 비교가 아니라 "새 Release가 올라왔는지"로 판단)
+// 릴리즈 확인 자체는 평일 08:45~18:00 사이 15분 간격으로 조용히 수행하고,
+// 새 릴리즈가 있을 때만(3번) 알림을 띄운다.
 
 const REPO = "park-rudxo/ssafy-check";
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
@@ -21,7 +23,7 @@ const DEFAULT_AUTO_OPEN = { enabled: true, minutesBefore: 5 };
 
 const REMINDERS = [
   { name: "ssafy-checkin", hour: 8, minute: 50, title: "SSAFY 입실 체크!", message: "09:00 전에 입실 체크하세요. (10분 남음)" },
-  { name: "ssafy-checkout", hour: 18, minute: 0, title: "SSAFY 퇴실 체크!", message: "18시가 지났습니다. 퇴실 버튼을 누르세요." },
+  { name: "ssafy-checkout", hour: 17, minute: 50, title: "SSAFY 퇴실 체크!", message: "18:00 10분 전이에요! 정리하고 퇴실 준비하세요." },
 ];
 
 function nextOccurrence(hour, minute) {
@@ -35,19 +37,16 @@ function nextOccurrenceFromMinutes(totalMin) {
   return nextOccurrence(Math.floor(totalMin / 60), totalMin % 60);
 }
 
-function nextTopOfHour() {
-  const now = new Date();
-  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours() + 1, 0, 0, 0);
-  return next.getTime();
-}
+// 릴리즈 확인을 실제로 수행할 시간대: 평일 08:45~18:00
+const UPDATE_CHECK_START_MIN = 8 * 60 + 45;
+const UPDATE_CHECK_END_MIN = 18 * 60;
 
-// 평일 09:00~18:00 사이인지 (공지 확인을 이 시간대에만 하기 위함)
 function isWithinCheckWindow() {
   const now = new Date();
   const day = now.getDay();
   if (day === 0 || day === 6) return false;
-  const hour = now.getHours();
-  return hour >= 9 && hour <= 18;
+  const totalMin = now.getHours() * 60 + now.getMinutes();
+  return totalMin >= UPDATE_CHECK_START_MIN && totalMin <= UPDATE_CHECK_END_MIN;
 }
 
 function scheduleAll() {
@@ -57,8 +56,9 @@ function scheduleAll() {
       periodInMinutes: 24 * 60,
     });
   }
-  // 매 정각마다 알람을 울리되, 실제 확인은 평일 09:00~18:00에만 수행한다.
-  chrome.alarms.create(UPDATE_ALARM, { when: nextTopOfHour(), periodInMinutes: 60 });
+  // 08:45부터 15분 간격으로 알람이 울린다. 실제 확인은 isWithinCheckWindow()로
+  // 평일 08:45~18:00 사이에만 조용히 수행하고, 그 밖의 시간엔 알람만 울리고 건너뛴다.
+  chrome.alarms.create(UPDATE_ALARM, { when: nextOccurrence(8, 45), periodInMinutes: 15 });
   scheduleAutoOpen();
 }
 

@@ -1,8 +1,11 @@
 // SSAFY 출석 체크 알리미 - 백그라운드 서비스 워커
-//  1) 평일 08:50(입실), 18:00(퇴실) 리마인더 알림
-//  2) GitHub Release '공지' 전달: 관리자가 Release를 발행(=배포)하면서 쓴
-//     릴리즈 노트가, 사용자에게 크롬 알림으로 그대로 전달된다.
-//     (버전 숫자 비교가 아니라, "새 Release가 올라왔는지"로 판단)
+// 사용자에게 실제로 알림이 가는 경우는 딱 3가지뿐이다.
+//  1) 평일 08:50 - 입실 10분 전 리마인더
+//  2) 평일 17:50 - 퇴실 10분 전 리마인더
+//  3) 새 GitHub Release가 발행됐을 때 - 그 릴리즈 노트를 그대로 알림으로 전달
+//     (버전 숫자 비교가 아니라 "새 Release가 올라왔는지"로 판단)
+// 릴리즈 확인 자체는 평일 08:45~18:00 사이 15분 간격으로 조용히 수행하고,
+// 새 릴리즈가 있을 때만(3번) 알림을 띄운다.
 
 const REPO = "park-rudxo/ssafy-check";
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
@@ -20,7 +23,7 @@ const DEFAULT_AUTO_OPEN = { enabled: true, minutesBefore: 5 };
 
 const REMINDERS = [
   { name: "ssafy-checkin", hour: 8, minute: 50, title: "SSAFY 입실 체크!", message: "09:00 전에 입실 체크하세요. (10분 남음)" },
-  { name: "ssafy-checkout", hour: 18, minute: 0, title: "SSAFY 퇴실 체크!", message: "18시가 지났습니다. 퇴실 버튼을 누르세요." },
+  { name: "ssafy-checkout", hour: 17, minute: 50, title: "SSAFY 퇴실 체크!", message: "18:00 10분 전이에요! 정리하고 퇴실 준비하세요." },
 ];
 
 function nextOccurrence(hour, minute) {
@@ -34,6 +37,18 @@ function nextOccurrenceFromMinutes(totalMin) {
   return nextOccurrence(Math.floor(totalMin / 60), totalMin % 60);
 }
 
+// 릴리즈 확인을 실제로 수행할 시간대: 평일 08:45~18:00
+const UPDATE_CHECK_START_MIN = 8 * 60 + 45;
+const UPDATE_CHECK_END_MIN = 18 * 60;
+
+function isWithinCheckWindow() {
+  const now = new Date();
+  const day = now.getDay();
+  if (day === 0 || day === 6) return false;
+  const totalMin = now.getHours() * 60 + now.getMinutes();
+  return totalMin >= UPDATE_CHECK_START_MIN && totalMin <= UPDATE_CHECK_END_MIN;
+}
+
 function scheduleAll() {
   for (const r of REMINDERS) {
     chrome.alarms.create(r.name, {
@@ -41,8 +56,9 @@ function scheduleAll() {
       periodInMinutes: 24 * 60,
     });
   }
-  // 6시간마다 새 공지(Release) 확인
-  chrome.alarms.create(UPDATE_ALARM, { delayInMinutes: 1, periodInMinutes: 360 });
+  // 08:45부터 15분 간격으로 알람이 울린다. 실제 확인은 isWithinCheckWindow()로
+  // 평일 08:45~18:00 사이에만 조용히 수행하고, 그 밖의 시간엔 알람만 울리고 건너뛴다.
+  chrome.alarms.create(UPDATE_ALARM, { when: nextOccurrence(8, 45), periodInMinutes: 15 });
   scheduleAutoOpen();
 }
 
@@ -84,12 +100,12 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 chrome.runtime.onStartup.addListener(() => {
   scheduleAll();
-  checkAnnouncement(false);
+  if (isWithinCheckWindow()) checkAnnouncement(false);
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === UPDATE_ALARM) {
-    checkAnnouncement(false);
+    if (isWithinCheckWindow()) checkAnnouncement(false);
     return;
   }
 
@@ -165,8 +181,12 @@ async function setBaselineIfNeeded() {
   }
 }
 
-// manual=false(자동): 새 공지면 크롬 알림을 띄우고 '본 것'으로 기록.
-// manual=true(팝업 버튼): 알림 없이 최신 공지 내용을 반환하고 '본 것'으로 기록.
+// manual=false(자동, 알람에 의한 확인): 새 공지면 크롬 알림을 띄우고 '알림을
+//   보낸 것'으로 기록한다. 이 기록만이 실제 알림 발송 여부를 결정한다.
+// manual=true(팝업의 '업데이트 확인' 버튼): 알림 없이 최신 공지 내용을 화면에
+//   보여주기만 하고, '본 것'으로 기록하지 않는다. (기록해버리면 이후 자동
+//   확인이 "이미 알림 보냈다"고 착각해 정작 크롬 알림이 영영 안 뜨는
+//   버그가 있었음 - 수동으로 미리보기만 한 사용자도 나중에 알림을 받아야 함)
 async function checkAnnouncement(manual) {
   const rel = await fetchLatestRelease();
   if (rel.none) return { ok: true, none: true };
@@ -187,10 +207,9 @@ async function checkAnnouncement(manual) {
       priority: 2,
       requireInteraction: true,
     });
+    // 실제로 알림을 보낸 경우에만 '본 것'으로 기록한다.
+    await chrome.storage.local.set({ lastSeenReleaseId: rel.id });
   }
-
-  // 자동이든 수동이든, 확인했으면 최신을 본 것으로 기록한다.
-  await chrome.storage.local.set({ lastSeenReleaseId: rel.id });
 
   return { ok: true, none: false, isNew, name: rel.name, tag: rel.tag, body: rel.body, url: rel.url };
 }

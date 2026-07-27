@@ -3,6 +3,7 @@
 //  2) GitHub Release '공지' 전달: 관리자가 Release를 발행(=배포)하면서 쓴
 //     릴리즈 노트가, 사용자에게 크롬 알림으로 그대로 전달된다.
 //     (버전 숫자 비교가 아니라, "새 Release가 올라왔는지"로 판단)
+//     확인 주기: 매 정각. 단, 평일 09:00~18:00 사이에만 실제로 확인한다.
 
 const REPO = "park-rudxo/ssafy-check";
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
@@ -34,6 +35,21 @@ function nextOccurrenceFromMinutes(totalMin) {
   return nextOccurrence(Math.floor(totalMin / 60), totalMin % 60);
 }
 
+function nextTopOfHour() {
+  const now = new Date();
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours() + 1, 0, 0, 0);
+  return next.getTime();
+}
+
+// 평일 09:00~18:00 사이인지 (공지 확인을 이 시간대에만 하기 위함)
+function isWithinCheckWindow() {
+  const now = new Date();
+  const day = now.getDay();
+  if (day === 0 || day === 6) return false;
+  const hour = now.getHours();
+  return hour >= 9 && hour <= 18;
+}
+
 function scheduleAll() {
   for (const r of REMINDERS) {
     chrome.alarms.create(r.name, {
@@ -41,8 +57,8 @@ function scheduleAll() {
       periodInMinutes: 24 * 60,
     });
   }
-  // 6시간마다 새 공지(Release) 확인
-  chrome.alarms.create(UPDATE_ALARM, { delayInMinutes: 1, periodInMinutes: 360 });
+  // 매 정각마다 알람을 울리되, 실제 확인은 평일 09:00~18:00에만 수행한다.
+  chrome.alarms.create(UPDATE_ALARM, { when: nextTopOfHour(), periodInMinutes: 60 });
   scheduleAutoOpen();
 }
 
@@ -84,12 +100,12 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 chrome.runtime.onStartup.addListener(() => {
   scheduleAll();
-  checkAnnouncement(false);
+  if (isWithinCheckWindow()) checkAnnouncement(false);
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === UPDATE_ALARM) {
-    checkAnnouncement(false);
+    if (isWithinCheckWindow()) checkAnnouncement(false);
     return;
   }
 

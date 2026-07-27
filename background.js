@@ -165,8 +165,12 @@ async function setBaselineIfNeeded() {
   }
 }
 
-// manual=false(자동): 새 공지면 크롬 알림을 띄우고 '본 것'으로 기록.
-// manual=true(팝업 버튼): 알림 없이 최신 공지 내용을 반환하고 '본 것'으로 기록.
+// manual=false(자동, 알람에 의한 확인): 새 공지면 크롬 알림을 띄우고 '알림을
+//   보낸 것'으로 기록한다. 이 기록만이 실제 알림 발송 여부를 결정한다.
+// manual=true(팝업의 '업데이트 확인' 버튼): 알림 없이 최신 공지 내용을 화면에
+//   보여주기만 하고, '본 것'으로 기록하지 않는다. (기록해버리면 이후 자동
+//   확인이 "이미 알림 보냈다"고 착각해 정작 크롬 알림이 영영 안 뜨는
+//   버그가 있었음 - 수동으로 미리보기만 한 사용자도 나중에 알림을 받아야 함)
 async function checkAnnouncement(manual) {
   const rel = await fetchLatestRelease();
   if (rel.none) return { ok: true, none: true };
@@ -187,10 +191,9 @@ async function checkAnnouncement(manual) {
       priority: 2,
       requireInteraction: true,
     });
+    // 실제로 알림을 보낸 경우에만 '본 것'으로 기록한다.
+    await chrome.storage.local.set({ lastSeenReleaseId: rel.id });
   }
-
-  // 자동이든 수동이든, 확인했으면 최신을 본 것으로 기록한다.
-  await chrome.storage.local.set({ lastSeenReleaseId: rel.id });
 
   return { ok: true, none: false, isNew, name: rel.name, tag: rel.tag, body: rel.body, url: rel.url };
 }

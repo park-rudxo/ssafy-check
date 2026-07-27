@@ -37,6 +37,15 @@ function nextOccurrenceFromMinutes(totalMin) {
   return nextOccurrence(Math.floor(totalMin / 60), totalMin % 60);
 }
 
+// 지금부터 intervalMinutes 단위의 다음 경계 시각(예: 15분이면 매시 00/15/30/45분)을 반환한다.
+// nextOccurrence(8,45)처럼 특정 시각에 고정 앵커를 두면, 그 시각이 이미 지난 뒤에
+// (예: 오전 8:45 이후 확장을 새로고침) 알람이 "내일" 그 시각까지 통째로 밀려버리는
+// 문제가 있었다. 이 방식은 언제 예약하든 항상 몇 분 안에 첫 알람이 온다.
+function nextIntervalBoundary(intervalMinutes) {
+  const ms = intervalMinutes * 60 * 1000;
+  return Math.ceil((Date.now() + 1000) / ms) * ms;
+}
+
 // 릴리즈 확인을 실제로 수행할 시간대: 평일 08:45~18:00
 const UPDATE_CHECK_START_MIN = 8 * 60 + 45;
 const UPDATE_CHECK_END_MIN = 18 * 60;
@@ -56,9 +65,10 @@ function scheduleAll() {
       periodInMinutes: 24 * 60,
     });
   }
-  // 08:45부터 15분 간격으로 알람이 울린다. 실제 확인은 isWithinCheckWindow()로
-  // 평일 08:45~18:00 사이에만 조용히 수행하고, 그 밖의 시간엔 알람만 울리고 건너뛴다.
-  chrome.alarms.create(UPDATE_ALARM, { when: nextOccurrence(8, 45), periodInMinutes: 15 });
+  // 15분마다 알람이 울린다(예약 시점과 무관하게 몇 분 안에 첫 알람이 옴).
+  // 실제 확인은 isWithinCheckWindow()로 평일 08:45~18:00 사이에만 조용히
+  // 수행하고, 그 밖의 시간엔 알람만 울리고 건너뛴다.
+  chrome.alarms.create(UPDATE_ALARM, { when: nextIntervalBoundary(15), periodInMinutes: 15 });
   scheduleAutoOpen();
 }
 

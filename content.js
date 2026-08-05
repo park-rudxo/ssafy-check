@@ -42,15 +42,45 @@
     /* storage API 사용 불가 시 실제 시간 기준으로만 동작 */
   }
 
+  // ── 사이트(서버) 시각 보정 ───────────────────────────────────────────
+  // PC 로컬 시계가 실제 SSAFY 서버 시각보다 빠르면, 화면 카운트다운이 0초가
+  // 되어 "지금 퇴실하세요"로 바뀐 시점에 눌러도 서버 로그에는 아직 17시대로
+  // 찍혀 조퇴 처리될 수 있다. 같은 origin(edu.ssafy.com)으로 가벼운 요청을
+  // 보내 응답의 Date 헤더로 서버 시각을 추정하고, 그 오차만큼 로컬 시각을
+  // 보정해서 모든 판단(카운트다운, 입실/퇴실 마감, 클릭 기록)에 사용한다.
+  let serverOffsetMs = 0;
+
+  function serverNow() {
+    return new Date(Date.now() + serverOffsetMs);
+  }
+
+  function syncServerTime() {
+    const reqStart = Date.now();
+    fetch(location.href, { method: "HEAD", cache: "no-store", credentials: "same-origin" })
+      .then((res) => {
+        const dateHeader = res.headers.get("date");
+        if (!dateHeader) return;
+        const serverMs = new Date(dateHeader).getTime();
+        if (Number.isNaN(serverMs)) return;
+        const reqEnd = Date.now();
+        // 왕복 시간의 절반만큼 보정해 좀 더 정확한 서버 시각을 추정한다.
+        const estimatedServerNow = serverMs + (reqEnd - reqStart) / 2;
+        serverOffsetMs = estimatedServerNow - reqEnd;
+      })
+      .catch(() => {
+        /* 실패하면 기존 오프셋(초기값 0=로컬 시각)을 그대로 유지한다. */
+      });
+  }
+
   function nowMinutes() {
     if (dev.enabled && dev.time != null) return dev.time;
-    const d = new Date();
+    const d = serverNow();
     return d.getHours() * 60 + d.getMinutes();
   }
 
   function isWeekday() {
     if (dev.enabled && dev.forceWeekday) return true;
-    const day = new Date().getDay();
+    const day = serverNow().getDay();
     return day >= 1 && day <= 5;
   }
 
@@ -233,7 +263,7 @@
   // 고정된다(분 단위, 초는 흐르지 않음 - 미리보기용이라 실시간 흐름은 불필요).
   function nowMs() {
     if (dev.enabled && dev.time != null) return dev.time * 60000;
-    const d = new Date();
+    const d = serverNow();
     return ((d.getHours() * 60 + d.getMinutes()) * 60 + d.getSeconds()) * 1000 + d.getMilliseconds();
   }
 
@@ -258,7 +288,7 @@
   const CHECKOUT_KEY = "ssafy-alert-last-checkout";
 
   function todayStr() {
-    const d = new Date();
+    const d = serverNow();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
 
@@ -420,6 +450,8 @@
   }
 
   // 주기 실행 + DOM 변경 감지
+  syncServerTime();
+  setInterval(syncServerTime, 5 * 60 * 1000); // 5분마다 서버-로컬 시각 오차 재보정
   loadDevSettings(update);
   setInterval(update, 15 * 1000);
   setInterval(tickCountdown, 1000);

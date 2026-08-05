@@ -42,15 +42,65 @@
     /* storage API 사용 불가 시 실제 시간 기준으로만 동작 */
   }
 
+  // ── 사이트(서버) 시각 보정 ───────────────────────────────────────────
+  // PC 로컬 시계가 실제 SSAFY 서버 시각보다 빠르면, 화면 카운트다운이 0초가
+  // 되어 "지금 퇴실하세요"로 바뀐 시점에 눌러도 서버 로그에는 아직 17시대로
+  // 찍혀 조퇴 처리될 수 있다. 같은 origin(edu.ssafy.com)으로 가벼운 요청을
+  // 보내 응답의 Date 헤더로 서버 시각을 추정하고, 그 오차만큼 로컬 시각을
+  // 보정해서 모든 판단(카운트다운, 입실/퇴실 마감, 클릭 기록)에 사용한다.
+  let serverOffsetMs = 0;
+
+  function serverNow() {
+    return new Date(Date.now() + serverOffsetMs);
+  }
+
+  function syncServerTime() {
+    const reqStart = Date.now();
+    fetch(location.href, { method: "HEAD", cache: "no-store", credentials: "same-origin" })
+      .then((res) => {
+        const dateHeader = res.headers.get("date");
+        if (!dateHeader) return;
+        const serverMs = new Date(dateHeader).getTime();
+        if (Number.isNaN(serverMs)) return;
+        const reqEnd = Date.now();
+        // 왕복 시간의 절반만큼 보정해 좀 더 정확한 서버 시각을 추정한다.
+        const estimatedServerNow = serverMs + (reqEnd - reqStart) / 2;
+        serverOffsetMs = estimatedServerNow - reqEnd;
+      })
+      .catch(() => {
+        /* 실패하면 기존 오프셋(초기값 0=로컬 시각)을 그대로 유지한다. */
+      });
+  }
+
+  // 계속 5분마다 보낼 필요는 없고, 실제로 오차가 문제가 되는 순간(입실/퇴실
+  // 마감 직전)에만 다시 맞추면 충분하다. 마감 5분 전(08:55, 17:55)에 딱 한
+  // 번씩만 재동기화한다. 판단 기준은 로컬 시계로 충분하다(트리거 시점만
+  // 대략 맞으면 되고, 어차피 이 함수 자체가 그 오차를 보정하는 함수라 아직
+  // 보정되지 않은 로컬 시각으로 트리거해도 문제없다).
+  const SYNC_BEFORE_MIN = 5;
+  let lastAutoSyncKey = null;
+
+  function maybeSyncServerTime() {
+    const d = new Date();
+    const totalMin = d.getHours() * 60 + d.getMinutes();
+    if (totalMin !== CHECK_IN_DEADLINE_MIN - SYNC_BEFORE_MIN && totalMin !== CHECK_OUT_START_MIN - SYNC_BEFORE_MIN) {
+      return;
+    }
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${totalMin}`;
+    if (key === lastAutoSyncKey) return; // 같은 분 안에 중복 호출 방지
+    lastAutoSyncKey = key;
+    syncServerTime();
+  }
+
   function nowMinutes() {
     if (dev.enabled && dev.time != null) return dev.time;
-    const d = new Date();
+    const d = serverNow();
     return d.getHours() * 60 + d.getMinutes();
   }
 
   function isWeekday() {
     if (dev.enabled && dev.forceWeekday) return true;
-    const day = new Date().getDay();
+    const day = serverNow().getDay();
     return day >= 1 && day <= 5;
   }
 
@@ -233,7 +283,7 @@
   // 고정된다(분 단위, 초는 흐르지 않음 - 미리보기용이라 실시간 흐름은 불필요).
   function nowMs() {
     if (dev.enabled && dev.time != null) return dev.time * 60000;
-    const d = new Date();
+    const d = serverNow();
     return ((d.getHours() * 60 + d.getMinutes()) * 60 + d.getSeconds()) * 1000 + d.getMilliseconds();
   }
 
@@ -258,7 +308,7 @@
   const CHECKOUT_KEY = "ssafy-alert-last-checkout";
 
   function todayStr() {
-    const d = new Date();
+    const d = serverNow();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
 
@@ -420,6 +470,8 @@
   }
 
   // 주기 실행 + DOM 변경 감지
+  syncServerTime(); // 페이지 로드 시 1회 보정
+  setInterval(maybeSyncServerTime, 30 * 1000); // 입실/퇴실 마감 5분 전에만 재보정
   loadDevSettings(update);
   setInterval(update, 15 * 1000);
   setInterval(tickCountdown, 1000);

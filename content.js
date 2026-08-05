@@ -72,6 +72,26 @@
       });
   }
 
+  // 계속 5분마다 보낼 필요는 없고, 실제로 오차가 문제가 되는 순간(입실/퇴실
+  // 마감 직전)에만 다시 맞추면 충분하다. 마감 5분 전(08:55, 17:55)에 딱 한
+  // 번씩만 재동기화한다. 판단 기준은 로컬 시계로 충분하다(트리거 시점만
+  // 대략 맞으면 되고, 어차피 이 함수 자체가 그 오차를 보정하는 함수라 아직
+  // 보정되지 않은 로컬 시각으로 트리거해도 문제없다).
+  const SYNC_BEFORE_MIN = 5;
+  let lastAutoSyncKey = null;
+
+  function maybeSyncServerTime() {
+    const d = new Date();
+    const totalMin = d.getHours() * 60 + d.getMinutes();
+    if (totalMin !== CHECK_IN_DEADLINE_MIN - SYNC_BEFORE_MIN && totalMin !== CHECK_OUT_START_MIN - SYNC_BEFORE_MIN) {
+      return;
+    }
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${totalMin}`;
+    if (key === lastAutoSyncKey) return; // 같은 분 안에 중복 호출 방지
+    lastAutoSyncKey = key;
+    syncServerTime();
+  }
+
   function nowMinutes() {
     if (dev.enabled && dev.time != null) return dev.time;
     const d = serverNow();
@@ -450,8 +470,8 @@
   }
 
   // 주기 실행 + DOM 변경 감지
-  syncServerTime();
-  setInterval(syncServerTime, 5 * 60 * 1000); // 5분마다 서버-로컬 시각 오차 재보정
+  syncServerTime(); // 페이지 로드 시 1회 보정
+  setInterval(maybeSyncServerTime, 30 * 1000); // 입실/퇴실 마감 5분 전에만 재보정
   loadDevSettings(update);
   setInterval(update, 15 * 1000);
   setInterval(tickCountdown, 1000);

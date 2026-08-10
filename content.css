@@ -1,7 +1,7 @@
 /* 버튼 위에 겹쳐 그리는 네모 박스 (오버레이) */
 .ssafy-alert-box {
-  position: fixed;
-  z-index: 2147483646;
+  position: fixed !important;
+  z-index: 2147483647 !important; /* 사이트 자체 헤더/드롭다운 메뉴보다 항상 위에 그려지도록 최댓값 사용 */
   display: none;
   box-sizing: border-box;
   border: 4px solid #e53935;

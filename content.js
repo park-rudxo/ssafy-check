@@ -214,7 +214,7 @@
       const lbl = document.createElement("div");
       lbl.className = "ssafy-alert-box-label";
       el.appendChild(lbl);
-      document.documentElement.appendChild(el);
+      document.body.appendChild(el);
       entry = { el, lbl, target };
       boxes.set(id, entry);
     }
@@ -222,6 +222,12 @@
     entry.el.dataset.tone = tone; // "danger" | "warn"
     entry.lbl.textContent = label || "";
     entry.lbl.style.display = label ? "block" : "none";
+    // 사이트 자체 헤더 메뉴(마우스오버 드롭다운 등)가 나중에 body에 추가/이동
+    // 되면서 우리 박스보다 뒤에 그려져 라벨이 가려 보일 수 있어, 갱신할 때마다
+    // body의 맨 끝으로 옮겨 항상 가장 나중에 그려지도록 한다.
+    if (entry.el.parentElement === document.body && document.body.lastElementChild !== entry.el) {
+      document.body.appendChild(entry.el);
+    }
     positionBox(entry);
   }
 

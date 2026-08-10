@@ -268,6 +268,51 @@
   window.addEventListener("resize", positionAll);
   setInterval(positionAll, 300);
 
+  // ── 사이트 상단 메뉴(드롭다운) 위에는 우리 박스를 띄우지 않기 ────────────
+  // 사이트 자체 상단 메뉴에 마우스를 올려 하위 메뉴가 펼쳐질 때, 우리 강조
+  // 박스/라벨/배너가 그 위에 겹쳐 보여서 메뉴 글자를 가리는 문제가 있었다.
+  // z-index를 아무리 올려도 결국 "우리가 메뉴 위"가 되어 반대 문제만
+  // 생기므로, 메뉴에 마우스가 올라가 있는 동안은 우리 오버레이를 아예
+  // 숨겨서 메뉴가 항상 위에 보이도록 한다.
+  let navEl = null;
+  let navHovered = false;
+
+  function findNavElement() {
+    if (navEl && document.contains(navEl)) return navEl;
+    let el =
+      document.querySelector('header, nav, [role="navigation"]') ||
+      findClickableByText(/마이캠퍼스/) ||
+      findClickableByText(/HELP\s*DESK/);
+    if (!el) return null;
+    // 텍스트로 찾은 경우, 상단 메뉴바(펼쳐지는 하위 메뉴까지 포함) 전체를
+    // 감싸는 넓은 조상까지 올라간다.
+    if (!(el.matches && el.matches("header, nav"))) {
+      let cur = el;
+      let best = el;
+      for (let i = 0; i < 8 && cur.parentElement; i++) {
+        cur = cur.parentElement;
+        if (cur.getBoundingClientRect().width >= window.innerWidth * 0.6) best = cur;
+      }
+      el = best;
+    }
+    navEl = el;
+    return navEl;
+  }
+
+  function setNavHovered(hovered) {
+    if (navHovered === hovered) return;
+    navHovered = hovered;
+    document.body.classList.toggle("ssafy-nav-open", navHovered);
+  }
+
+  function attachNavHoverGuard() {
+    const nav = findNavElement();
+    if (!nav || nav.dataset.ssafyNavGuard) return;
+    nav.dataset.ssafyNavGuard = "1";
+    nav.addEventListener("mouseenter", () => setNavHovered(true));
+    nav.addEventListener("mouseleave", () => setNavHovered(false));
+  }
+
   function showBanner(message, tone) {
     let banner = document.getElementById(BANNER_ID);
     if (!banner) {
@@ -400,6 +445,7 @@
 
   function update() {
     countdown = null;
+    attachNavHoverGuard();
 
     // 출석 위젯이 없는 화면(커리큘럼·로그인 등)에서는 상태를 알 수 없으므로
     // 아무것도 표시하지 않는다. (다른 화면에서 "미입실"로 오판하는 문제 방지)

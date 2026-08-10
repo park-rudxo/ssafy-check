@@ -70,6 +70,7 @@ function scheduleAll() {
   // 수행하고, 그 밖의 시간엔 알람만 울리고 건너뛴다.
   chrome.alarms.create(UPDATE_ALARM, { when: nextIntervalBoundary(15), periodInMinutes: 15 });
   scheduleAutoOpen();
+  scheduleMattermostWarnings();
 }
 
 // ── 입실/퇴실 N분 전 자동 열기 ────────────────────────────────────────
@@ -102,6 +103,167 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.autoOpen) scheduleAutoOpen();
 });
 
+// ── Mattermost 연동 ───────────────────────────────────────────────────
+// 크롬 알림은 자리를 비우거나 크롬을 닫으면 못 보지만, Mattermost로 보내면
+// 폰 앱으로 푸시가 오기 때문에 "18시 넘었는데 퇴실 안 함"을 놓치기 어렵다.
+// Incoming Webhook(토큰/봇 계정 불필요)에 JSON을 POST하는 방식만 쓴다.
+const MM_DEFAULTS = {
+  enabled: false,
+  webhookUrl: "",
+  notifyCheckin: true,
+  notifyCheckout: true,
+  notifyMissing: true,
+};
+
+// 미체크 경고를 보낼 시각들. 한 번 보내고 끝내면 놓치기 쉬워서, 아직
+// 체크되지 않은 동안 점점 촘촘하게 여러 번 보낸다.
+const MM_WARN_CHECKIN_MINS = [8 * 60 + 50, 8 * 60 + 55, 8 * 60 + 58];
+const MM_WARN_CHECKOUT_MINS = [18 * 60, 18 * 60 + 5, 18 * 60 + 15, 18 * 60 + 30];
+const MM_WARN_PREFIX = "ssafy-mm-warn-";
+
+async function getMattermost() {
+  const { mattermost } = await chrome.storage.local.get("mattermost");
+  return { ...MM_DEFAULTS, ...(mattermost || {}) };
+}
+
+function todayStr(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function hhmm(totalMin) {
+  return `${String(Math.floor(totalMin / 60)).padStart(2, "0")}:${String(totalMin % 60).padStart(2, "0")}`;
+}
+
+// Incoming Webhook으로 메시지 1건 전송. 일시적인 네트워크 오류를 감안해 1회 재시도.
+async function postToMattermost(text, cfg) {
+  const s = cfg || (await getMattermost());
+  if (!s.webhookUrl) return { ok: false, error: "Webhook URL이 설정되지 않았어요." };
+
+  let lastErr = "알 수 없는 오류";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(s.webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (res.ok) return { ok: true };
+      // 4xx는 재시도해도 같은 결과라 바로 포기한다 (URL 오타 등).
+      lastErr = `Mattermost 응답 오류 (${res.status})`;
+      if (res.status >= 400 && res.status < 500) break;
+    } catch (e) {
+      // host_permissions가 없으면 여기서 CORS 오류로 떨어진다.
+      lastErr = String(e && e.message ? e.message : e);
+    }
+  }
+  return { ok: false, error: lastErr };
+}
+
+// ── 오늘의 출석 상태 (content.js가 알려준 클릭 기록) ────────────────────
+// content.js는 페이지의 localStorage에 기록하는데 서비스 워커는 그걸 읽을 수
+// 없어서, 같은 내용을 chrome.storage.local에도 저장해 백그라운드가 "아직 안
+// 눌렀는지"를 판단할 수 있게 한다.
+const ATTENDANCE_DEFAULT = { date: "", checkinMin: null, checkoutMin: null, observedCheckedIn: false };
+
+async function getAttendance() {
+  const { attendance } = await chrome.storage.local.get("attendance");
+  const a = { ...ATTENDANCE_DEFAULT, ...(attendance || {}) };
+  // 날짜가 바뀌었으면 어제 기록은 무시한다.
+  if (a.date !== todayStr()) return { ...ATTENDANCE_DEFAULT, date: todayStr() };
+  return a;
+}
+
+// 같은 날 같은 알림을 중복 전송하지 않도록 기록한다.
+// (SSAFY 탭을 여러 개 열어두면 클릭 보고가 여러 번 올 수 있다)
+async function markSentOnce(key) {
+  const today = todayStr();
+  const { mmSent } = await chrome.storage.local.get("mmSent");
+  const s = mmSent && mmSent.date === today ? mmSent : { date: today, keys: [] };
+  if (s.keys.includes(key)) return false; // 이미 보냄
+  s.keys.push(key);
+  await chrome.storage.local.set({ mmSent: s });
+  return true;
+}
+
+async function handleAttendanceRecorded(msg) {
+  const kind = msg.kind === "checkin" ? "checkin" : "checkout";
+  const minutes = Number(msg.minutes);
+  if (!Number.isFinite(minutes)) return { ok: false };
+
+  const a = await getAttendance();
+  a.date = todayStr();
+  if (kind === "checkin") {
+    if (a.checkinMin == null) a.checkinMin = minutes;
+  } else {
+    // 퇴실은 18시 이후 기록이 있어야 인정되므로 가장 늦은 클릭을 남긴다.
+    if (a.checkoutMin == null || minutes > a.checkoutMin) a.checkoutMin = minutes;
+  }
+  await chrome.storage.local.set({ attendance: a });
+
+  const s = await getMattermost();
+  if (!s.enabled || !s.webhookUrl) return { ok: true };
+  if (kind === "checkin" && !s.notifyCheckin) return { ok: true };
+  if (kind === "checkout" && !s.notifyCheckout) return { ok: true };
+  // 18시 이전 퇴실 클릭은 아직 정상 퇴실이 아니라 "완료"로 알리지 않는다.
+  if (kind === "checkout" && minutes < CHECK_OUT_MIN) return { ok: true };
+  if (!(await markSentOnce(`click-${kind}`))) return { ok: true };
+
+  const text =
+    kind === "checkin"
+      ? `✅ **입실 체크 완료** (${hhmm(minutes)})`
+      : `✅ **퇴실 체크 완료** (${hhmm(minutes)})`;
+  await postToMattermost(text, s);
+  return { ok: true };
+}
+
+// content.js가 페이지에서 읽어낸 입실 완료 상태를 반영한다.
+async function handleAttendanceObserved(msg) {
+  if (msg.checkedIn !== true) return { ok: true };
+  const a = await getAttendance();
+  if (a.observedCheckedIn) return { ok: true };
+  a.date = todayStr();
+  a.observedCheckedIn = true;
+  await chrome.storage.local.set({ attendance: a });
+  return { ok: true };
+}
+
+// 미체크 경고는 일부러 매번 보낸다(점점 촘촘해지는 리마인더라 중복이 아님).
+async function handleMattermostWarning(totalMin) {
+  const day = new Date().getDay();
+  if (day === 0 || day === 6) return;
+
+  const s = await getMattermost();
+  if (!s.enabled || !s.webhookUrl || !s.notifyMissing) return;
+
+  const a = await getAttendance();
+  if (MM_WARN_CHECKIN_MINS.includes(totalMin)) {
+    // 클릭 기록이 없어도 페이지에서 "정상 출석"이 확인됐으면 입실한 것이다.
+    if (a.checkinMin != null || a.observedCheckedIn) return;
+    const left = CHECK_IN_MIN - totalMin;
+    await postToMattermost(`🚨 **아직 입실 체크를 안 했어요!** 09:00까지 ${left}분 남았습니다.\n${SSAFY_HOME}`, s);
+    return;
+  }
+
+  if (a.checkoutMin != null && a.checkoutMin >= CHECK_OUT_MIN) return; // 이미 정상 퇴실
+  const late = totalMin - CHECK_OUT_MIN;
+  const when = late === 0 ? "방금 18:00이 됐어요." : `18:00에서 ${late}분 지났어요.`;
+  await postToMattermost(
+    `🚨 **아직 퇴실 체크를 안 했어요!** ${when} 지금 누르지 않으면 조퇴 처리될 수 있어요.\n${SSAFY_HOME}`,
+    s
+  );
+}
+
+function scheduleMattermostWarnings() {
+  // 설정이 꺼져 있어도 알람 자체는 예약해두고, 발송 시점에 설정을 확인한다.
+  // (설정을 켜자마자 재예약할 필요가 없어 단순하다)
+  for (const min of [...MM_WARN_CHECKIN_MINS, ...MM_WARN_CHECKOUT_MINS]) {
+    chrome.alarms.create(MM_WARN_PREFIX + min, {
+      when: nextOccurrenceFromMinutes(min),
+      periodInMinutes: 24 * 60,
+    });
+  }
+}
+
 chrome.runtime.onInstalled.addListener(async () => {
   scheduleAll();
   // 설치/업데이트 직후에는 "현재 최신 Release"를 이미 본 것으로 기준을 잡아
@@ -116,6 +278,12 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === UPDATE_ALARM) {
     if (isWithinCheckWindow()) checkAnnouncement(false);
+    return;
+  }
+
+  // 입실/퇴실 미체크 경고를 Mattermost로 전송
+  if (alarm.name.startsWith(MM_WARN_PREFIX)) {
+    handleMattermostWarning(parseInt(alarm.name.slice(MM_WARN_PREFIX.length), 10));
     return;
   }
 
@@ -224,10 +392,25 @@ async function checkAnnouncement(manual) {
   return { ok: true, none: false, isNew, name: rel.name, tag: rel.tag, body: rel.body, url: rel.url };
 }
 
-// 팝업의 "업데이트 확인" 버튼 요청 처리
+// 팝업/콘텐츠 스크립트 요청 처리
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === "checkUpdate") {
     checkAnnouncement(true).then(sendResponse);
     return true; // 비동기 응답
+  }
+  // content.js가 입실/퇴실 버튼 클릭을 알려온 경우
+  if (msg && msg.type === "attendanceRecorded") {
+    handleAttendanceRecorded(msg).then(sendResponse);
+    return true;
+  }
+  // content.js가 페이지에서 입실 완료를 확인한 경우
+  if (msg && msg.type === "attendanceObserved") {
+    handleAttendanceObserved(msg).then(sendResponse);
+    return true;
+  }
+  // 팝업의 "테스트 메시지 보내기" 버튼
+  if (msg && msg.type === "mattermostTest") {
+    postToMattermost("✅ SSAFY 출석 체크 알리미 연결 테스트입니다.").then(sendResponse);
+    return true;
   }
 });

@@ -364,10 +364,26 @@
   }
 
   function recordClick(key) {
+    const minutes = nowMinutes();
     try {
-      localStorage.setItem(key, JSON.stringify({ date: todayStr(), minutes: nowMinutes() }));
+      localStorage.setItem(key, JSON.stringify({ date: todayStr(), minutes }));
     } catch (e) {
       /* localStorage 사용 불가 시 무시 */
+    }
+    // 백그라운드에도 알린다. 서비스 워커는 페이지의 localStorage를 읽을 수
+    // 없어서, 이 보고가 있어야 "아직 안 눌렀는지"를 판단해 Mattermost 경고를
+    // 보낼 수 있다.
+    try {
+      const p = chrome.runtime.sendMessage({
+        type: "attendanceRecorded",
+        kind: key === CHECKIN_KEY ? "checkin" : "checkout",
+        minutes,
+        date: todayStr(),
+      });
+      // 서비스 워커가 없을 때 나는 "Receiving end does not exist"를 무시한다.
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    } catch (e) {
+      /* 확장 컨텍스트가 무효화된 경우 무시 */
     }
   }
 
@@ -385,6 +401,27 @@
   // 오늘 입실 버튼을 누른 기록이 있으면 입실 완료로 본다.
   function hasCheckinToday() {
     return !!readRecord(CHECKIN_KEY);
+  }
+
+  // 페이지에서 "정상 출석"을 읽어 입실 완료를 확인했다면 백그라운드에도 알린다.
+  // 폰이나 다른 브라우저로 입실한 경우엔 클릭 기록이 없어서, 이 보고가 없으면
+  // 백그라운드가 "아직 입실 안 함"으로 오해하고 헛경고를 보내게 된다.
+  let reportedCheckedIn = false;
+
+  function reportObservedCheckin(checkedIn) {
+    if (dev.enabled) return; // 개발자 모드의 가상 상태는 보고하지 않는다
+    if (checkedIn !== true || reportedCheckedIn) return;
+    reportedCheckedIn = true;
+    try {
+      const p = chrome.runtime.sendMessage({
+        type: "attendanceObserved",
+        checkedIn: true,
+        date: todayStr(),
+      });
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    } catch (e) {
+      /* 확장 컨텍스트가 무효화된 경우 무시 */
+    }
   }
 
   // 오늘 18:00 이후에 퇴실을 누른 기록이 있으면 정상 퇴실로 본다.
@@ -458,6 +495,7 @@
 
     const now = nowMinutes();
     const checkedIn = isCheckedIn();
+    reportObservedCheckin(checkedIn);
 
     // ── 입실 박스 ──
     if (!checkedIn) {

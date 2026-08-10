@@ -130,7 +130,8 @@
       font-weight: 700;
       color: #555;
     }
-    input[type="time"] {
+    input[type="time"],
+    input[type="url"] {
       width: 100%;
       box-sizing: border-box;
       padding: 6px 8px;
@@ -158,6 +159,40 @@
     .btn-checkout { background: #e53935; }
     .btn-off { background: #607d8b; grid-column: 1 / -1; }
     .dev-note {
+      margin-top: 8px;
+      color: #888;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    /* Mattermost 알림 */
+    .mm {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #eee;
+    }
+    .mm-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+      font-weight: 700;
+      color: #444;
+    }
+    .mm-header .arrow { transition: transform 0.2s; }
+    .mm-header.open .arrow { transform: rotate(90deg); }
+    .mm-body { margin-top: 12px; display: none; }
+    .mm-body.open { display: block; }
+    .mm-controls.disabled { opacity: 0.45; pointer-events: none; }
+    .mm-events label {
+      display: block;
+      margin-bottom: 4px;
+      font-weight: 400;
+      cursor: pointer;
+    }
+    .btn-test { background: #4a5f7a; }
+    .mm-note {
       margin-top: 8px;
       color: #888;
       font-size: 11px;
@@ -216,6 +251,42 @@
       <span>분 전에 자동으로 열기</span>
     </div>
     <div class="autoopen-note">평일에만 동작하며, 크롬이 실행 중이어야 해요.</div>
+  </div>
+
+  <div class="mm">
+    <div class="mm-header" id="mm-header">
+      <span>💬 Mattermost 알림</span>
+      <span class="arrow">▶</span>
+    </div>
+    <div class="mm-body" id="mm-body">
+      <div class="toggle-row">
+        <label for="mm-enabled">Mattermost로 보내기</label>
+        <input type="checkbox" id="mm-enabled" />
+      </div>
+
+      <div class="mm-controls" id="mm-controls">
+        <div class="field">
+          <span class="field-label">Incoming Webhook URL</span>
+          <input type="url" id="mm-url" placeholder="https://.../hooks/xxxxxxxxxx" />
+          <div class="time-hint">Mattermost → 통합 → Incoming Webhook에서 만든 URL</div>
+        </div>
+
+        <div class="field mm-events">
+          <span class="field-label">보낼 내용</span>
+          <label><input type="checkbox" id="mm-checkin" /> 입실 체크 완료</label>
+          <label><input type="checkbox" id="mm-checkout" /> 퇴실 체크 완료</label>
+          <label><input type="checkbox" id="mm-missing" /> 미체크 경고 (08:50~ / 18:00~)</label>
+        </div>
+
+        <button id="mm-test" class="btn-test">테스트 메시지 보내기</button>
+        <div id="mm-status" class="update-status"></div>
+      </div>
+
+      <div class="mm-note">
+        크롬 알림과 달리 <b>폰 Mattermost 앱으로 푸시</b>가 와서, 자리를 비워도
+        퇴실을 놓치기 어려워요. 미체크 경고는 평일에만, 체크할 때까지 여러 번 보냅니다.
+      </div>
+    </div>
   </div>
 
   <div class="update">

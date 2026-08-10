@@ -171,7 +171,17 @@ async function postToMattermost(text, cfg) {
 // content.js는 페이지의 localStorage에 기록하는데 서비스 워커는 그걸 읽을 수
 // 없어서, 같은 내용을 chrome.storage.local에도 저장해 백그라운드가 "아직 안
 // 눌렀는지"를 판단할 수 있게 한다.
-const ATTENDANCE_DEFAULT = { date: "", checkinMin: null, checkoutMin: null, observedCheckedIn: false };
+const ATTENDANCE_DEFAULT = {
+  date: "",
+  checkinMin: null, // 이 브라우저에서 버튼을 누른 기록
+  checkoutMin: null,
+  pageCheckinMin: null, // 출석 위젯에 찍힌 시각 (서버 기준, 더 신뢰도 높음)
+  pageCheckoutMin: null,
+};
+
+function numOrNull(v) {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
 
 async function getAttendance() {
   const { attendance } = await chrome.storage.local.get("attendance");
@@ -224,13 +234,15 @@ async function handleAttendanceRecorded(msg) {
   return { ok: true };
 }
 
-// content.js가 페이지에서 읽어낸 입실 완료 상태를 반영한다.
+// content.js가 출석 위젯에서 읽어낸 서버 기준 시각을 반영한다.
 async function handleAttendanceObserved(msg) {
-  if (msg.checkedIn !== true) return { ok: true };
+  const ci = numOrNull(msg.checkinMin);
+  const co = numOrNull(msg.checkoutMin);
   const a = await getAttendance();
-  if (a.observedCheckedIn) return { ok: true };
+  if (a.pageCheckinMin === ci && a.pageCheckoutMin === co) return { ok: true };
   a.date = todayStr();
-  a.observedCheckedIn = true;
+  a.pageCheckinMin = ci;
+  a.pageCheckoutMin = co;
   await chrome.storage.local.set({ attendance: a });
   return { ok: true };
 }
@@ -245,14 +257,26 @@ async function handleMattermostWarning(totalMin) {
 
   const a = await getAttendance();
   if (MM_WARN_CHECKIN_MINS.includes(totalMin)) {
-    // 클릭 기록이 없어도 페이지에서 "정상 출석"이 확인됐으면 입실한 것이다.
-    if (a.checkinMin != null || a.observedCheckedIn) return;
+    // 위젯에 입실 시각이 찍혀 있으면 폰으로 눌렀더라도 입실한 것이다.
+    if (a.pageCheckinMin != null || a.checkinMin != null) return;
     const left = CHECK_IN_MIN - totalMin;
     await postToMattermost(`🚨 **아직 입실 체크를 안 했어요!** 09:00까지 ${left}분 남았습니다.\n${SSAFY_HOME}`, s);
     return;
   }
 
-  if (a.checkoutMin != null && a.checkoutMin >= CHECK_OUT_MIN) return; // 이미 정상 퇴실
+  // 위젯에서 읽은 시각이 있으면 그게 서버 기준 진실이라 클릭 기록보다 우선한다.
+  if (a.pageCheckoutMin != null) {
+    if (a.pageCheckoutMin >= CHECK_OUT_MIN) return; // 정상 퇴실 확인됨
+    // 18시 이전 기록만 있는 상태. "안 눌렀다"가 아니라 "일찍 눌렀다"이므로
+    // 무엇이 문제인지 정확히 알려준다.
+    await postToMattermost(
+      `🚨 **퇴실 기록이 ${hhmm(a.pageCheckoutMin)}(18시 이전)뿐이에요!** 지금 다시 누르지 않으면 조퇴 처리됩니다.\n${SSAFY_HOME}`,
+      s
+    );
+    return;
+  }
+
+  if (a.checkoutMin != null && a.checkoutMin >= CHECK_OUT_MIN) return; // 클릭 기록으로 확인
   const late = totalMin - CHECK_OUT_MIN;
   const when = late === 0 ? "방금 18:00이 됐어요." : `18:00에서 ${late}분 지났어요.`;
   await postToMattermost(
@@ -272,12 +296,23 @@ function scheduleMattermostWarnings() {
   }
 }
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(async (details) => {
   scheduleAll();
   // 설치/업데이트 직후에는 "현재 최신 Release"를 이미 본 것으로 기준을 잡아
   // 방금 설치한 사용자에게 곧바로 알림이 뜨지 않도록 한다.
   await setBaselineIfNeeded();
+  // 처음 설치했을 때만 튜토리얼 + 초기 설정 화면을 연다.
+  // (업데이트 때마다 열면 성가시므로 install에서만)
+  if (details && details.reason === "install") openWelcome();
 });
+
+function openWelcome() {
+  try {
+    chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
+  } catch (e) {
+    /* 탭을 열 수 없는 상황이면 무시 (팝업에서 다시 열 수 있다) */
+  }
+}
 chrome.runtime.onStartup.addListener(() => {
   scheduleAll();
   if (isWithinCheckWindow()) checkAnnouncement(false);
@@ -416,9 +451,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     handleAttendanceObserved(msg).then(sendResponse);
     return true;
   }
-  // 팝업의 "테스트 메시지 보내기" 버튼
+  // 팝업/튜토리얼의 "테스트 메시지 보내기" 버튼
   if (msg && msg.type === "mattermostTest") {
     postToMattermost("✅ SSAFY 출석 체크 알리미 연결 테스트입니다.").then(sendResponse);
     return true;
+  }
+  // 팝업의 "사용법 다시 보기"
+  if (msg && msg.type === "openWelcome") {
+    openWelcome();
+    sendResponse({ ok: true });
+    return false;
   }
 });

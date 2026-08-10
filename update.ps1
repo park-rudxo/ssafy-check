@@ -9,6 +9,8 @@ $ErrorActionPreference = "Stop"
 # 진행바를 켜두면 Invoke-WebRequest 다운로드가 눈에 띄게 느려진다.
 $ProgressPreference = "SilentlyContinue"
 $REPO = "park-rudxo/ssafy-check"
+# 업데이트.bat 자체가 바뀌어 교체가 필요한지 (zip 경로에서만 설정된다)
+$batUpdated = $false
 
 # $PSScriptRoot 가 비는 환경을 대비한 폴백
 $ROOT = $PSScriptRoot
@@ -143,7 +145,25 @@ if (Test-Path (Join-Path $ROOT ".git")) {
         }
 
         Write-Host "  덮어쓰는 중..." -ForegroundColor DarkGray
-        Copy-Item -Path (Join-Path $src "*") -Destination $ROOT -Recurse -Force
+
+        # 실행 중인 배치 파일은 건드리지 않는다.
+        # cmd 는 배치를 줄 단위로 읽으며 바이트 위치를 기억하기 때문에, 실행
+        # 도중 파일이 바뀌면 엉뚱한 위치부터 이어 읽어 오작동할 수 있다.
+        # (update.ps1 은 PowerShell 이 실행 전에 전체를 파싱해두므로 안전하다)
+        $selfBat = "업데이트.bat"
+        Get-ChildItem -Path $src -Force | ForEach-Object {
+            if ($_.Name -eq $selfBat) {
+                $cur = Join-Path $ROOT $selfBat
+                $newHash = (Get-FileHash $_.FullName).Hash
+                $curHash = if (Test-Path $cur) { (Get-FileHash $cur).Hash } else { "" }
+                if ($newHash -ne $curHash) {
+                    Copy-Item $_.FullName (Join-Path $ROOT "$selfBat.new") -Force
+                    $script:batUpdated = $true
+                }
+                return
+            }
+            Copy-Item -Path $_.FullName -Destination $ROOT -Recurse -Force
+        }
     } catch {
         Fail "업데이트 중 오류가 발생했습니다.`n         $($_.Exception.Message)"
     } finally {
@@ -172,3 +192,15 @@ Write-Host ""
 Write-Host "  (버튼이 안 보이면 chrome://extensions 에서" -ForegroundColor DarkGray
 Write-Host "   이 확장의 새로고침 아이콘을 눌러주세요)" -ForegroundColor DarkGray
 Write-Host ""
+
+if ($batUpdated) {
+    Write-Host "  ------------------------------------------------" -ForegroundColor Yellow
+    Write-Host "  업데이트.bat 자체가 새 버전으로 바뀌었습니다." -ForegroundColor Yellow
+    Write-Host "  지금 실행 중이라 바로 교체하지 못했으니, 이 창을 닫은 뒤"
+    Write-Host "  폴더에서 아래처럼 바꿔주세요. (한 번만 하면 됩니다)"
+    Write-Host ""
+    Write-Host "      업데이트.bat       삭제"
+    Write-Host "      업데이트.bat.new   ->  업데이트.bat 으로 이름 변경"
+    Write-Host "  ------------------------------------------------" -ForegroundColor Yellow
+    Write-Host ""
+}

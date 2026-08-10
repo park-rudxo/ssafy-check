@@ -49,6 +49,18 @@
       font-size: 12px;
     }
 
+    /* 업데이트 적용 안내 */
+    .reload-notice {
+      margin-bottom: 12px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #fff8e1;
+      border: 1px solid #ffca28;
+    }
+    .reload-notice[hidden] { display: none; }
+    .reload-text { margin-bottom: 8px; color: #6d4c00; font-weight: 700; }
+    .btn-reload { background: #f57c00; }
+
     /* 업데이트 확인 */
     .update {
       margin-top: 12px;
@@ -245,6 +257,12 @@
 </head>
 <body>
   <h1>⏰ SSAFY 출석 체크 알리미</h1>
+
+  <!-- 파일은 최신인데 확장이 아직 예전 버전으로 돌고 있을 때만 표시 -->
+  <div id="reload-notice" class="reload-notice" hidden>
+    <div class="reload-text">📦 새 버전 <b id="reload-ver"></b> 을(를) 받았어요!</div>
+    <button id="reload-now" class="btn-reload">지금 적용하기</button>
+  </div>
   <div id="status" class="status idle">상태 확인 중...</div>
   <ul>
     <li>입실: <b>09:00 이전</b> 필수 (08:59까지)</li>

@@ -1,0 +1,12 @@
+# 윈도우 업데이트 도구는 반드시 CRLF 로 체크아웃되어야 한다.
+# (batch 파일이 LF 면 label/goto 처리에서 오작동할 수 있다)
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# 나머지 소스는 LF 로 통일
+*.js   text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+*.css  text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf

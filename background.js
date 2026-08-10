@@ -110,6 +110,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 const MM_DEFAULTS = {
   enabled: false,
   webhookUrl: "",
+  channel: "", // 비우면 Webhook에 설정된 채널. "@아이디"면 개인 메시지(DM)
   notifyCheckin: true,
   notifyCheckout: true,
   notifyMissing: true,
@@ -139,13 +140,20 @@ async function postToMattermost(text, cfg) {
   const s = cfg || (await getMattermost());
   if (!s.webhookUrl) return { ok: false, error: "Webhook URL이 설정되지 않았어요." };
 
+  // channel을 넣으면 Webhook의 기본 채널 대신 이쪽으로 간다.
+  // "@아이디"는 개인 메시지(DM)가 되고, DM은 Mattermost 기본 설정에서
+  // 폰 푸시가 오기 때문에 혼자 쓰는 알림용으로는 이게 가장 확실하다.
+  // 단, Webhook을 만들 때 "이 채널로 잠금"을 켜두면 서버가 이 값을 무시한다.
+  const payload = { text };
+  if (s.channel) payload.channel = s.channel;
+
   let lastErr = "알 수 없는 오류";
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await fetch(s.webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) return { ok: true };
       // 4xx는 재시도해도 같은 결과라 바로 포기한다 (URL 오타 등).

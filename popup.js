@@ -9,6 +9,7 @@
   const MM_DEFAULTS = {
     enabled: false,
     webhookUrl: "",
+    channel: "",
     notifyCheckin: true,
     notifyCheckout: true,
     notifyMissing: true,
@@ -105,6 +106,7 @@
   function renderMattermost() {
     document.getElementById("mm-enabled").checked = mm.enabled;
     document.getElementById("mm-url").value = mm.webhookUrl;
+    document.getElementById("mm-channel").value = mm.channel;
     document.getElementById("mm-checkin").checked = mm.notifyCheckin;
     document.getElementById("mm-checkout").checked = mm.notifyCheckout;
     document.getElementById("mm-missing").checked = mm.notifyMissing;
@@ -161,9 +163,17 @@
     });
   }
 
+  // Mattermost의 사용자명·채널명에는 공백이 없다. 붙여넣다 섞인 공백만 걷어낸다.
+  function normalizeChannel(v) {
+    return String(v || "")
+      .trim()
+      .replace(/\s+/g, "");
+  }
+
   function testMattermost() {
     const btn = document.getElementById("mm-test");
     const url = document.getElementById("mm-url").value.trim();
+    const channel = normalizeChannel(document.getElementById("mm-channel").value);
     if (!url) {
       setMmStatus("Webhook URL을 먼저 입력해주세요.", "err");
       return;
@@ -177,9 +187,11 @@
         setMmStatus(perm.error, "err");
         return;
       }
-      // 권한을 받은 뒤 최신 URL로 저장하고 전송한다.
+      // 권한을 받은 뒤 화면의 최신 값으로 저장하고 전송한다.
       mm.webhookUrl = url;
+      mm.channel = channel;
       chrome.storage.local.set({ mattermost: mm }, () => {
+        renderMattermost();
         chrome.runtime.sendMessage({ type: "mattermostTest" }, (res) => {
           btn.disabled = false;
           if (chrome.runtime.lastError || !res) {
@@ -190,7 +202,12 @@
             setMmStatus("전송 실패: " + (res.error || "알 수 없는 오류"), "err");
             return;
           }
-          setMmStatus("✅ 보냈어요! Mattermost 채널을 확인해보세요.", "ok");
+          const where = channel
+            ? channel.startsWith("@")
+              ? `${channel} 개인 메시지`
+              : `${channel} 채널`
+            : "Webhook 기본 채널";
+          setMmStatus(`✅ 보냈어요! ${where}을(를) 확인해보세요.`, "ok");
         });
       });
     });
@@ -259,6 +276,7 @@
         }
         mm.enabled = true;
         mm.webhookUrl = url;
+        mm.channel = normalizeChannel(document.getElementById("mm-channel").value);
         saveMattermost();
         setMmStatus("✅ 준비됐어요. 테스트 메시지로 확인해보세요.", "ok");
       });
@@ -266,6 +284,11 @@
 
     document.getElementById("mm-url").addEventListener("change", (e) => {
       mm.webhookUrl = e.target.value.trim();
+      saveMattermost();
+    });
+
+    document.getElementById("mm-channel").addEventListener("change", (e) => {
+      mm.channel = normalizeChannel(e.target.value);
       saveMattermost();
     });
 

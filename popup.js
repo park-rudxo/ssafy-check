@@ -6,6 +6,15 @@
   const AUTO_OPEN_DEFAULTS = { enabled: true, minutesBefore: 5 };
   let autoOpen = { ...AUTO_OPEN_DEFAULTS };
 
+  const MM_DEFAULTS = {
+    enabled: false,
+    webhookUrl: "",
+    notifyCheckin: true,
+    notifyCheckout: true,
+    notifyMissing: true,
+  };
+  let mm = { ...MM_DEFAULTS };
+
   // ── 시간 변환 유틸 ─────────────────────────────────────────────────
   function hhmmToMinutes(str) {
     const m = /^(\d{1,2}):(\d{2})$/.exec(str || "");
@@ -92,6 +101,101 @@
     }
   }
 
+  // ── Mattermost ─────────────────────────────────────────────────────
+  function renderMattermost() {
+    document.getElementById("mm-enabled").checked = mm.enabled;
+    document.getElementById("mm-url").value = mm.webhookUrl;
+    document.getElementById("mm-checkin").checked = mm.notifyCheckin;
+    document.getElementById("mm-checkout").checked = mm.notifyCheckout;
+    document.getElementById("mm-missing").checked = mm.notifyMissing;
+    document.getElementById("mm-controls").classList.toggle("disabled", !mm.enabled);
+  }
+
+  function saveMattermost() {
+    try {
+      chrome.storage.local.set({ mattermost: mm }, renderMattermost);
+    } catch (e) {
+      renderMattermost();
+    }
+  }
+
+  function setMmStatus(text, kind) {
+    const el = document.getElementById("mm-status");
+    el.className = "update-status" + (kind ? " " + kind : "");
+    el.textContent = text;
+  }
+
+  // Webhook 호스트는 사용자마다 달라서 manifest에 미리 넣을 수 없다.
+  // optional_host_permissions로 두고, URL을 넣은 그 호스트만 런타임에 요청한다.
+  // (권한이 없으면 서비스 워커의 fetch가 CORS로 막힌다)
+  function originPatternFromUrl(url) {
+    try {
+      const u = new URL(url);
+      if (u.protocol !== "https:") return null;
+      return u.origin + "/*";
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function ensureOriginPermission(url) {
+    return new Promise((resolve) => {
+      const pattern = originPatternFromUrl(url);
+      if (!pattern) {
+        resolve({ ok: false, error: "https:// 로 시작하는 올바른 Webhook URL을 입력해주세요." });
+        return;
+      }
+      chrome.permissions.contains({ origins: [pattern] }, (has) => {
+        if (has) {
+          resolve({ ok: true });
+          return;
+        }
+        chrome.permissions.request({ origins: [pattern] }, (granted) => {
+          if (chrome.runtime.lastError) {
+            resolve({ ok: false, error: chrome.runtime.lastError.message });
+            return;
+          }
+          resolve(granted ? { ok: true } : { ok: false, error: "권한을 허용해야 메시지를 보낼 수 있어요." });
+        });
+      });
+    });
+  }
+
+  function testMattermost() {
+    const btn = document.getElementById("mm-test");
+    const url = document.getElementById("mm-url").value.trim();
+    if (!url) {
+      setMmStatus("Webhook URL을 먼저 입력해주세요.", "err");
+      return;
+    }
+    btn.disabled = true;
+    setMmStatus("보내는 중...");
+
+    ensureOriginPermission(url).then((perm) => {
+      if (!perm.ok) {
+        btn.disabled = false;
+        setMmStatus(perm.error, "err");
+        return;
+      }
+      // 권한을 받은 뒤 최신 URL로 저장하고 전송한다.
+      mm.webhookUrl = url;
+      chrome.storage.local.set({ mattermost: mm }, () => {
+        chrome.runtime.sendMessage({ type: "mattermostTest" }, (res) => {
+          btn.disabled = false;
+          if (chrome.runtime.lastError || !res) {
+            setMmStatus("전송 실패. 잠시 후 다시 시도해주세요.", "err");
+            return;
+          }
+          if (!res.ok) {
+            setMmStatus("전송 실패: " + (res.error || "알 수 없는 오류"), "err");
+            return;
+          }
+          setMmStatus("✅ 보냈어요! Mattermost 채널을 확인해보세요.", "ok");
+        });
+      });
+    });
+  }
+
   // ── 이벤트 바인딩 ──────────────────────────────────────────────────
   function bind() {
     // 섹션 펼치기/접기
@@ -121,6 +225,62 @@
       autoOpen.minutesBefore = n;
       saveAutoOpen();
     });
+
+    // Mattermost 설정
+    const mmHeader = document.getElementById("mm-header");
+    const mmBody = document.getElementById("mm-body");
+    mmHeader.addEventListener("click", () => {
+      const open = mmBody.classList.toggle("open");
+      mmHeader.classList.toggle("open", open);
+    });
+
+    document.getElementById("mm-enabled").addEventListener("change", (e) => {
+      const on = e.target.checked;
+      const url = document.getElementById("mm-url").value.trim();
+      if (!on) {
+        mm.enabled = false;
+        saveMattermost();
+        setMmStatus("");
+        return;
+      }
+      // 켤 때 Webhook 호스트 권한을 함께 요청한다 (체크박스 클릭이 사용자 제스처).
+      if (!url) {
+        mm.enabled = true;
+        saveMattermost();
+        setMmStatus("Webhook URL을 입력한 뒤 '테스트 메시지 보내기'를 눌러주세요.");
+        return;
+      }
+      ensureOriginPermission(url).then((perm) => {
+        if (!perm.ok) {
+          mm.enabled = false;
+          saveMattermost();
+          setMmStatus(perm.error, "err");
+          return;
+        }
+        mm.enabled = true;
+        mm.webhookUrl = url;
+        saveMattermost();
+        setMmStatus("✅ 준비됐어요. 테스트 메시지로 확인해보세요.", "ok");
+      });
+    });
+
+    document.getElementById("mm-url").addEventListener("change", (e) => {
+      mm.webhookUrl = e.target.value.trim();
+      saveMattermost();
+    });
+
+    [
+      ["mm-checkin", "notifyCheckin"],
+      ["mm-checkout", "notifyCheckout"],
+      ["mm-missing", "notifyMissing"],
+    ].forEach(([id, key]) => {
+      document.getElementById(id).addEventListener("change", (e) => {
+        mm[key] = e.target.checked;
+        saveMattermost();
+      });
+    });
+
+    document.getElementById("mm-test").addEventListener("click", testMattermost);
 
     document.getElementById("dev-enabled").addEventListener("change", (e) => {
       dev.enabled = e.target.checked;
@@ -233,20 +393,27 @@
       document.getElementById("version-label").textContent = "";
     }
     try {
-      chrome.storage.local.get(["ssafyDev", "autoOpen"], (data) => {
+      chrome.storage.local.get(["ssafyDev", "autoOpen", "mattermost"], (data) => {
         dev = { ...DEV_DEFAULTS, ...(data && data.ssafyDev) };
         // 켜진 상태인데 time이 비어 있으면 기본 가상 시각으로 채운다.
         if (dev.enabled && dev.time == null) dev.time = hhmmToMinutes("08:30");
         if (dev.enabled) openDevSection();
         autoOpen = { ...AUTO_OPEN_DEFAULTS, ...(data && data.autoOpen) };
+        mm = { ...MM_DEFAULTS, ...(data && data.mattermost) };
+        if (mm.enabled) {
+          document.getElementById("mm-body").classList.add("open");
+          document.getElementById("mm-header").classList.add("open");
+        }
         renderStatus();
         renderDevControls();
         renderAutoOpen();
+        renderMattermost();
       });
     } catch (e) {
       renderStatus();
       renderDevControls();
       renderAutoOpen();
+      renderMattermost();
     }
   }
 

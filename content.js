@@ -170,6 +170,46 @@
     return findClickableByText(/퇴실\s*하기/);
   }
 
+  // ── 페이지에 표시된 출석 상태 읽기 ──────────────────────────────────
+  // SSAFY 홈 출석 위젯의 실제 구조:
+  //   <div class="wrap-going">
+  //     <div class="state inRoomEnd"><span><span class="t1">08:25</span> 정상 출석</span></div>
+  //     <div class="state2 outRoomEnd"><a id="checkOut"><span class="t1">13:50</span>퇴실하기</a></div>
+  //   </div>
+  // 입실은 문구가 "입실하기" → "정상 출석"으로 바뀌지만, 퇴실은 누른 뒤에도
+  // 문구가 "퇴실하기" 그대로이고 .t1에 시각만 찍힌다. 그래서 퇴실 여부는
+  // 문구가 아니라 이 시각으로만 판별할 수 있다.
+  function attendanceWidget() {
+    return document.querySelector(".wrap-going");
+  }
+
+  function parseHhmm(text) {
+    const m = /(\d{1,2}):(\d{2})/.exec(text || "");
+    if (!m) return null;
+    const h = parseInt(m[1], 10);
+    const mi = parseInt(m[2], 10);
+    if (h > 23 || mi > 59) return null;
+    return h * 60 + mi;
+  }
+
+  // 위젯에 찍힌 입실 시각(분). 아직 입실 전이면 null.
+  function pageCheckinMinutes() {
+    const w = attendanceWidget();
+    const cell = w && w.querySelector(".state");
+    return cell ? parseHhmm(cell.textContent) : null;
+  }
+
+  // 위젯에 찍힌 퇴실 시각(분). 아직 퇴실 기록이 없으면 null.
+  function pageCheckoutMinutes() {
+    const w = attendanceWidget();
+    const cell = (w && w.querySelector(".state2")) || document.getElementById("checkOut");
+    return cell ? parseHhmm(cell.textContent) : null;
+  }
+
+  function minutesToHhmm(min) {
+    return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+  }
+
   // 출석 위젯(노란 박스) - 입실/퇴실 셀을 모두 못 찾을 때의 대체 강조 대상.
   function findAttendanceWidget() {
     const label = findClickableByText(/출석체크/);
@@ -181,12 +221,14 @@
   // 커리큘럼·로그인 등 다른 화면에는 위젯이 없어 출석 상태를 알 수 없으므로,
   // 그런 화면에서는 "미입실"로 오판하지 않도록 강조/배너를 표시하지 않는다.
   function onAttendancePage() {
-    return !!findClickableByText(/출석체크/);
+    return !!attendanceWidget() || !!findClickableByText(/출석체크/);
   }
 
   function isCheckedIn() {
     if (dev.enabled && dev.checkedIn === "true") return true;
     if (dev.enabled && dev.checkedIn === "false") return false;
+    // 위젯에 입실 시각이 찍혀 있으면 서버 기준으로 확정이다.
+    if (pageCheckinMinutes() != null) return true;
     // 오늘 입실 클릭 기록이 있거나 "정상 출석" 문구가 보이면 입실 완료
     if (hasCheckinToday() || pageHasText(/정상\s*출석/)) return true;
     // "입실하기" 문구가 명시적으로 보이면 아직 입실 전이다. 퇴실 버튼은
@@ -366,7 +408,7 @@
   function recordClick(key) {
     const minutes = nowMinutes();
     try {
-      localStorage.setItem(key, JSON.stringify({ date: todayStr(), minutes }));
+      localStorage.setItem(key, JSON.stringify({ date: todayStr(), minutes, at: Date.now() }));
     } catch (e) {
       /* localStorage 사용 불가 시 무시 */
     }
@@ -403,20 +445,25 @@
     return !!readRecord(CHECKIN_KEY);
   }
 
-  // 페이지에서 "정상 출석"을 읽어 입실 완료를 확인했다면 백그라운드에도 알린다.
-  // 폰이나 다른 브라우저로 입실한 경우엔 클릭 기록이 없어서, 이 보고가 없으면
-  // 백그라운드가 "아직 입실 안 함"으로 오해하고 헛경고를 보내게 된다.
-  let reportedCheckedIn = false;
+  // 위젯에서 읽은 서버 기준 시각을 백그라운드에 알린다. 서비스 워커는 페이지를
+  // 읽을 수 없어서, 이 보고가 없으면 Mattermost 경고가 이 브라우저의 클릭
+  // 기록에만 의존하게 된다. (폰으로 체크했거나 서버 반영이 실패한 경우를 놓침)
+  let lastReportedObserved = "";
 
-  function reportObservedCheckin(checkedIn) {
+  function reportObserved() {
     if (dev.enabled) return; // 개발자 모드의 가상 상태는 보고하지 않는다
-    if (checkedIn !== true || reportedCheckedIn) return;
-    reportedCheckedIn = true;
+    if (!attendanceWidget()) return;
+    const checkinMin = pageCheckinMinutes();
+    const checkoutMin = pageCheckoutMinutes();
+    const sig = `${todayStr()}|${checkinMin}|${checkoutMin}`;
+    if (sig === lastReportedObserved) return; // 값이 바뀔 때만 보낸다
+    lastReportedObserved = sig;
     try {
       const p = chrome.runtime.sendMessage({
         type: "attendanceObserved",
-        checkedIn: true,
         date: todayStr(),
+        checkinMin,
+        checkoutMin,
       });
       if (p && typeof p.catch === "function") p.catch(() => {});
     } catch (e) {
@@ -424,10 +471,23 @@
     }
   }
 
-  // 오늘 18:00 이후에 퇴실을 누른 기록이 있으면 정상 퇴실로 본다.
+  // 퇴실 클릭 직후에는 위젯에 시각이 아직 안 찍혔을 수 있다(서버 반영 전).
+  // 이 유예 시간 동안만 클릭 기록을 임시로 인정하고, 그 뒤에는 위젯에 실제로
+  // 반영됐는지로만 판단한다. 눌렀지만 서버에 안 들어간 경우를 잡기 위함이다.
+  const CHECKOUT_GRACE_MS = 90 * 1000;
+
+  // 오늘 18:00 이후의 퇴실 기록이 있으면 정상 퇴실로 본다.
+  // 위젯을 읽을 수 있으면 거기 찍힌 시각이 서버 기준 진실이므로 최우선이다.
   function hasValidCheckoutToday() {
+    const pageMin = pageCheckoutMinutes();
+    if (pageMin != null) return pageMin >= CHECK_OUT_START_MIN;
+
     const rec = readRecord(CHECKOUT_KEY);
-    return !!rec && rec.minutes >= CHECK_OUT_START_MIN;
+    if (!rec || rec.minutes < CHECK_OUT_START_MIN) return false;
+    // 위젯이 없는 화면에서는 클릭 기록이 유일한 근거다.
+    if (!attendanceWidget()) return true;
+    // 위젯은 보이는데 시각이 아직 없으면, 클릭 직후 잠깐만 인정한다.
+    return rec.at != null && Date.now() - rec.at < CHECKOUT_GRACE_MS;
   }
 
   function showToast(message) {
@@ -495,7 +555,7 @@
 
     const now = nowMinutes();
     const checkedIn = isCheckedIn();
-    reportObservedCheckin(checkedIn);
+    reportObserved();
 
     // ── 입실 박스 ──
     if (!checkedIn) {
@@ -529,8 +589,20 @@
         hideBanner();
         return;
       }
-      ensureBox("checkout", checkOutTarget, "danger", "🚨 지금 퇴실하세요! (18시 이후)");
-      showBanner("🚨 18시가 지났습니다! 지금 퇴실 버튼을 누르세요. (18시 이전 기록만으로는 조퇴 처리될 수 있어요)", "danger");
+      // 위젯에 18시 이전 시각이 찍혀 있으면 "안 누름"이 아니라 "일찍 누름"이라,
+      // 무엇이 문제인지 정확히 알려준다.
+      const early = pageCheckoutMinutes();
+      if (early != null && early < CHECK_OUT_START_MIN) {
+        const t = minutesToHhmm(early);
+        ensureBox("checkout", checkOutTarget, "danger", `🚨 ${t} 기록뿐! 지금 다시 누르세요`);
+        showBanner(
+          `🚨 퇴실 기록이 ${t}(18시 이전)뿐입니다! 지금 다시 눌러야 조퇴 처리를 피할 수 있어요.`,
+          "danger"
+        );
+      } else {
+        ensureBox("checkout", checkOutTarget, "danger", "🚨 지금 퇴실하세요! (18시 이후)");
+        showBanner("🚨 18시가 지났습니다! 지금 퇴실 버튼을 누르세요. (18시 이전 기록만으로는 조퇴 처리될 수 있어요)", "danger");
+      }
     } else {
       // 18:00 이전: 주황색 안내 박스 (미리 눌러도 되지만 18시 이후 재클릭 필요)
       const left = secondsLeftText(CHECK_OUT_START_MIN);

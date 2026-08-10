@@ -10,18 +10,17 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $REPO = "park-rudxo/ssafy-check"
 
+# $PSScriptRoot 가 비는 환경을 대비한 폴백
+$ROOT = $PSScriptRoot
+if (-not $ROOT) { $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Definition }
+if (-not $ROOT) { $ROOT = (Get-Location).Path }
+
 function Write-Head($text) {
     Write-Host ""
     Write-Host "  ================================================" -ForegroundColor DarkGray
     Write-Host "    $text"
     Write-Host "  ================================================" -ForegroundColor DarkGray
     Write-Host ""
-}
-
-function Get-LocalVersion {
-    $f = Join-Path $PSScriptRoot "manifest.json"
-    if (-not (Test-Path $f)) { return $null }
-    try { return (Get-Content -Raw $f | ConvertFrom-Json).version } catch { return $null }
 }
 
 function Fail($msg) {
@@ -31,22 +30,41 @@ function Fail($msg) {
     exit 1
 }
 
-Set-Location $PSScriptRoot
+# manifest.json 은 BOM 없는 UTF-8 이고 한글이 들어 있다.
+# PowerShell 5.1 은 BOM 이 없으면 시스템 기본 인코딩(한국어 Windows 는 CP949)
+# 으로 읽기 때문에 한글 바이트를 해석하지 못하고 ConvertFrom-Json 까지 실패한다.
+# 반드시 -Encoding UTF8 을 지정해야 한다.
+function Get-LocalVersion {
+    $f = Join-Path $ROOT "manifest.json"
+    if (-not (Test-Path $f)) { return $null }
+    try {
+        return (Get-Content -Raw -Encoding UTF8 $f | ConvertFrom-Json).version
+    } catch {
+        Write-Host "  (버전을 읽지 못했습니다: $($_.Exception.Message))" -ForegroundColor DarkGray
+        return $null
+    }
+}
+
+Set-Location $ROOT
 Write-Head "SSAFY 출석 체크 알리미 - 업데이트"
 
-# 엉뚱한 폴더에서 실행되지 않도록 확인
-$before = Get-LocalVersion
-if (-not $before) {
-    Fail "확장 폴더가 아닙니다. manifest.json 이 있는 폴더에 두고 실행하세요."
+# 엉뚱한 폴더에서 실행되지 않도록 확인한다.
+# 버전을 못 읽는 것과 폴더가 틀린 것은 원인이 다르므로 따로 판단한다.
+if (-not (Test-Path (Join-Path $ROOT "manifest.json"))) {
+    Fail "확장 폴더가 아닙니다. manifest.json 이 있는 폴더에 두고 실행하세요.`n         지금 위치: $ROOT"
 }
-Write-Host "  현재 버전 : v$before"
+
+# 버전은 안내용일 뿐이라, 못 읽어도 업데이트는 그대로 진행한다.
+$before = Get-LocalVersion
+if ($before) {
+    Write-Host "  현재 버전 : v$before"
+} else {
+    Write-Host "  현재 버전 : 확인 불가 (업데이트는 그대로 진행합니다)"
+}
 Write-Host ""
 
-$usedGit = $false
-
-if (Test-Path (Join-Path $PSScriptRoot ".git")) {
+if (Test-Path (Join-Path $ROOT ".git")) {
     # ── git 으로 받은 경우 ────────────────────────────────────────────
-    $usedGit = $true
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         Fail "git 폴더인데 git 이 설치되어 있지 않습니다. Git for Windows 를 설치하세요."
     }
@@ -88,7 +106,7 @@ if (Test-Path (Join-Path $PSScriptRoot ".git")) {
         $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$REPO/releases/latest" `
                                  -Headers @{ "User-Agent" = "ssafy-check-updater" }
     } catch {
-        Fail "GitHub 에 연결하지 못했습니다. 인터넷 연결을 확인해주세요."
+        Fail "GitHub 에 연결하지 못했습니다. 인터넷 연결을 확인해주세요.`n         $($_.Exception.Message)"
     }
 
     $asset = $rel.assets | Where-Object { $_.name -like "*.zip" } | Select-Object -First 1
@@ -97,7 +115,7 @@ if (Test-Path (Join-Path $PSScriptRoot ".git")) {
     }
 
     $latest = $rel.tag_name -replace '^v', ''
-    if ($latest -eq $before) {
+    if ($before -and $latest -eq $before) {
         Write-Head "이미 최신 버전입니다. (v$before)"
         Write-Host "  따로 하실 일은 없습니다."
         Write-Host ""
@@ -125,9 +143,9 @@ if (Test-Path (Join-Path $PSScriptRoot ".git")) {
         }
 
         Write-Host "  덮어쓰는 중..." -ForegroundColor DarkGray
-        Copy-Item -Path (Join-Path $src "*") -Destination $PSScriptRoot -Recurse -Force
+        Copy-Item -Path (Join-Path $src "*") -Destination $ROOT -Recurse -Force
     } catch {
-        Fail "업데이트 중 오류가 발생했습니다. $($_.Exception.Message)"
+        Fail "업데이트 중 오류가 발생했습니다.`n         $($_.Exception.Message)"
     } finally {
         Remove-Item -Path $tmp -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -135,14 +153,17 @@ if (Test-Path (Join-Path $PSScriptRoot ".git")) {
 
 $after = Get-LocalVersion
 
-if ($before -eq $after) {
+if ($before -and $after -and $before -eq $after) {
     Write-Head "이미 최신 버전입니다. (v$after)"
     Write-Host "  따로 하실 일은 없습니다."
     Write-Host ""
     exit 0
 }
 
-Write-Head "업데이트 완료!   v$before  ->  v$after"
+$fromTxt = if ($before) { "v$before" } else { "이전 버전" }
+$toTxt = if ($after) { "v$after" } else { "최신 버전" }
+
+Write-Head "업데이트 완료!   $fromTxt  ->  $toTxt"
 Write-Host "  마지막 한 단계가 남았습니다." -ForegroundColor Yellow
 Write-Host ""
 Write-Host "    1. 크롬 툴바의 확장 아이콘을 눌러 팝업을 여세요."

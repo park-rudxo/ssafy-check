@@ -296,12 +296,23 @@ function scheduleMattermostWarnings() {
   }
 }
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(async (details) => {
   scheduleAll();
   // 설치/업데이트 직후에는 "현재 최신 Release"를 이미 본 것으로 기준을 잡아
   // 방금 설치한 사용자에게 곧바로 알림이 뜨지 않도록 한다.
   await setBaselineIfNeeded();
+  // 처음 설치했을 때만 튜토리얼 + 초기 설정 화면을 연다.
+  // (업데이트 때마다 열면 성가시므로 install에서만)
+  if (details && details.reason === "install") openWelcome();
 });
+
+function openWelcome() {
+  try {
+    chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
+  } catch (e) {
+    /* 탭을 열 수 없는 상황이면 무시 (팝업에서 다시 열 수 있다) */
+  }
+}
 chrome.runtime.onStartup.addListener(() => {
   scheduleAll();
   if (isWithinCheckWindow()) checkAnnouncement(false);
@@ -440,9 +451,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     handleAttendanceObserved(msg).then(sendResponse);
     return true;
   }
-  // 팝업의 "테스트 메시지 보내기" 버튼
+  // 팝업/튜토리얼의 "테스트 메시지 보내기" 버튼
   if (msg && msg.type === "mattermostTest") {
     postToMattermost("✅ SSAFY 출석 체크 알리미 연결 테스트입니다.").then(sendResponse);
     return true;
+  }
+  // 팝업의 "사용법 다시 보기"
+  if (msg && msg.type === "openWelcome") {
+    openWelcome();
+    sendResponse({ ok: true });
+    return false;
   }
 });

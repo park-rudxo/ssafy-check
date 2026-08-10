@@ -227,6 +227,10 @@
       chrome.tabs.create({ url: "https://edu.ssafy.com/edu/main/index.do" });
     });
 
+    document.getElementById("open-welcome").addEventListener("click", () => {
+      chrome.runtime.sendMessage({ type: "openWelcome" }, () => window.close());
+    });
+
     document.getElementById("check-update").addEventListener("click", checkUpdate);
 
     // 자동 열기 설정

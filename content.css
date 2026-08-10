@@ -19,6 +19,14 @@
   border-style: dashed;
 }
 
+/* 사이트 상단 메뉴에 마우스를 올려 하위 메뉴가 펼쳐진 동안은, 우리 오버레이가
+   메뉴 글자를 가리지 않도록 아예 숨긴다. (JS가 inline style로 display:block을
+   줘도 !important로 덮어써서 확실히 숨긴다) */
+body.ssafy-nav-open .ssafy-alert-box,
+body.ssafy-nav-open #ssafy-alert-banner {
+  display: none !important;
+}
+
 @keyframes ssafy-box-pulse {
   0%, 100% {
     border-color: #e53935;

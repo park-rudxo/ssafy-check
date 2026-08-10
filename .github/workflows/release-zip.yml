@@ -30,6 +30,9 @@ jobs:
              popup.html popup.js welcome.html welcome.css welcome.js \
              dist/ssafy-check/
           cp -r icons dist/ssafy-check/
+          # 업데이트 도구도 함께 넣는다. zip 으로 설치한 사람도 이 파일만
+          # 더블클릭하면 최신 Release 를 받아 덮어쓸 수 있다.
+          cp 업데이트.bat update.ps1 dist/ssafy-check/
           cd dist
           zip -r "../ssafy-check-v${{ steps.v.outputs.version }}.zip" ssafy-check
           cd ..

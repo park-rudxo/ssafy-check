@@ -227,6 +227,10 @@
       chrome.tabs.create({ url: "https://edu.ssafy.com/edu/main/index.do" });
     });
 
+    document.getElementById("reload-now").addEventListener("click", () => {
+      chrome.runtime.reload(); // 디스크의 최신 파일로 확장을 다시 읽어들인다
+    });
+
     document.getElementById("open-welcome").addEventListener("click", () => {
       chrome.runtime.sendMessage({ type: "openWelcome" }, () => window.close());
     });
@@ -363,6 +367,31 @@
     document.getElementById("dev-header").classList.add("open");
   }
 
+  // ── 받아둔 업데이트 적용 ───────────────────────────────────────────
+  // 업데이트.bat(git pull)으로 디스크의 파일은 바뀌었지만 확장은 아직 예전
+  // 버전으로 돌고 있는 상태를 감지한다. 메모리에 로드된 manifest 버전과
+  // 디스크에서 새로 읽은 manifest 버전을 비교하면 알 수 있다.
+  // chrome.runtime.reload()가 디스크에서 다시 읽어들이므로, 사용자가
+  // chrome://extensions 까지 갈 필요가 없어진다.
+  function checkPendingReload() {
+    let loaded;
+    try {
+      loaded = chrome.runtime.getManifest().version;
+    } catch (e) {
+      return;
+    }
+    fetch(chrome.runtime.getURL("manifest.json"), { cache: "no-store" })
+      .then((res) => res.json())
+      .then((onDisk) => {
+        if (!onDisk || !onDisk.version || onDisk.version === loaded) return;
+        document.getElementById("reload-ver").textContent = "v" + onDisk.version;
+        document.getElementById("reload-notice").hidden = false;
+      })
+      .catch(() => {
+        /* 읽지 못하면 그냥 안내를 띄우지 않는다 */
+      });
+  }
+
   // ── 업데이트 확인 ──────────────────────────────────────────────────
   function checkUpdate() {
     const statusEl = document.getElementById("update-status");
@@ -412,6 +441,7 @@
   // ── 초기화 ─────────────────────────────────────────────────────────
   function init() {
     bind();
+    checkPendingReload();
     // 현재 버전 표시
     try {
       const v = chrome.runtime.getManifest().version;

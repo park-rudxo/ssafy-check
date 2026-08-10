@@ -173,11 +173,39 @@ SSAFY 홈의 출석 위젯에는 **서버에 기록된 입실·퇴실 시각이 
 
 확장 팝업의 **🎓 사용법 다시 보기 · 초기 설정** 버튼을 누르면 언제든 다시 열 수 있습니다.
 
-### 업데이트
+### 업데이트 — `업데이트.bat` 더블클릭
 
-새 버전이 나오면 확장이 알림으로 알려줍니다. 알림을 받으면 **1~5번을 다시** 하시면 됩니다. (기존 폴더에 덮어쓰고 `chrome://extensions`에서 **새로고침(🔄)** 을 눌러도 됩니다)
+새 버전이 나오면 확장이 알림으로 알려줍니다. 그때 폴더 안의 **`업데이트.bat` 을 더블클릭**하세요.
+
+```
+업데이트.bat 더블클릭
+        ↓
+확장 팝업 열고 [지금 적용하기] 클릭
+        ↓
+끝
+```
+
+`업데이트.bat` 은 설치 방식을 알아서 판단합니다.
+
+| 설치 방식 | 동작 |
+|---|---|
+| zip 으로 설치 | 최신 Release zip 을 **자동으로 내려받아 덮어씀** |
+| git clone 으로 설치 | `git pull --ff-only` 실행 |
+
+업데이트를 받으면 확장 팝업 맨 위에 **[지금 적용하기]** 버튼이 나타납니다. 이 버튼을 누르면 `chrome://extensions` 에 갈 필요 없이 바로 적용됩니다.
 
 설정한 Mattermost 정보나 알림 설정은 **업데이트해도 그대로 유지**됩니다.
+
+> `업데이트.bat` 이 하는 일은 PowerShell 스크립트(`update.ps1`)에 들어 있습니다. bat 은 이를 실행하는 껍데기입니다. 배치의 한글·따옴표 처리가 까다로워 실제 로직은 PowerShell 쪽에 두었습니다.
+
+<details>
+<summary>수동으로 업데이트하려면</summary>
+
+- **zip 설치**: [Releases](https://github.com/park-rudxo/ssafy-check/releases/latest)에서 새 zip 을 받아 기존 폴더에 덮어쓰기
+- **git 설치**: 폴더에서 `git pull`
+
+그다음 확장 팝업의 **[지금 적용하기]** 또는 `chrome://extensions` 의 **새로고침(🔄)**.
+</details>
 
 <details>
 <summary>개발자용: git으로 설치하기</summary>
@@ -199,6 +227,9 @@ background.js   # 크롬 알림 스케줄러 + Mattermost 전송 + 홈 자동 �
 popup.html/js   # 현재 상태 + Mattermost/자동 열기 설정 + 버전/업데이트 확인 + 개발자 모드
 welcome.html/css/js  # 첫 설치 시 자동으로 열리는 튜토리얼 + 초기 설정 마법사
 icons/          # 익스텐션 아이콘
+
+업데이트.bat    # 더블클릭 업데이트 (update.ps1 실행하는 껍데기)
+update.ps1      # zip 자동 다운로드 또는 git pull
 
 .github/workflows/release-zip.yml  # Release 발행 시 설치용 zip 자동 첨부
 ```

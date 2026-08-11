@@ -519,7 +519,7 @@
       const head = res.isNew ? `🆕 새 공지: ${escapeHtml(title)}` : `📢 최신 공지: ${escapeHtml(title)}`;
       statusEl.innerHTML =
         `${head}${notesHtml}` +
-        `<div class="pull-hint">업데이트: <code>git pull</code> 후 확장 새로고침(🔄)</div>` +
+        `<div class="pull-hint">업데이트: <code>업데이트.bat</code> 실행 후 위에 뜨는 <b>[지금 적용하기]</b></div>` +
         `<div><a href="${res.url}" target="_blank">릴리스 노트 자세히 보기</a></div>`;
     });
   }

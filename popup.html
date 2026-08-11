@@ -74,6 +74,12 @@
       gap: 8px;
     }
     #version-label { color: #666; font-weight: 700; }
+    .update-links {
+      margin-top: 8px;
+      font-size: 12px;
+    }
+    .update-links a { color: #1976d2; font-weight: 700; text-decoration: none; }
+    .update-links a:hover { text-decoration: underline; }
     .btn-small {
       width: auto;
       padding: 6px 12px;
@@ -404,6 +410,11 @@
     <div class="update-row">
       <span id="version-label">버전 확인 중...</span>
       <button id="check-update" class="btn-small">업데이트 확인</button>
+    </div>
+    <div class="update-links">
+      <a href="https://github.com/park-rudxo/ssafy-check/releases/latest" target="_blank" rel="noopener">
+        📢 최신 공지 · 다운로드 페이지 열기
+      </a>
     </div>
     <div id="update-status" class="update-status"></div>
   </div>

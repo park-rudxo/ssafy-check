@@ -23,7 +23,9 @@ try {
 
 const REPO = "park-rudxo/ssafy-check";
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
-const RELEASES_PAGE = `https://github.com/${REPO}/releases`;
+// /releases/latest 는 항상 최신 릴리스 페이지로 넘어간다. 버전이 올라가도
+// 링크를 고칠 필요가 없어서, 알림 클릭과 팝업 링크 모두 이걸 쓴다.
+const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`;
 const SSAFY_HOME = "https://edu.ssafy.com/edu/main/index.do";
 const UPDATE_ALARM = "ssafy-update-check";
 const UPDATE_NOTI_ID = "ssafy-update";

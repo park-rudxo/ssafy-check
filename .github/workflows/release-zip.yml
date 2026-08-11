@@ -1,6 +1,14 @@
 # Release를 발행하면 바로 설치 가능한 zip을 만들어 첨부한다.
 # 사용자가 git이나 개발 도구 없이 "다운로드 → 압축 해제 → 폴더 선택"만으로
 # 설치할 수 있게 하기 위함이다.
+#
+# 웹스토어 제출용 zip 은 요구 조건이 달라서 따로 만든다.
+#  - manifest.json 이 zip 최상위에 있어야 한다 (설치용처럼 폴더로 감싸면 안 됨)
+#  - 업데이트.bat / update.ps1 은 스토어에서 쓰이지 않는 Windows 실행 스크립트라
+#    "확장 기능과 무관한 파일"로 심사에서 지적받을 수 있으므로 넣지 않는다
+# 이건 개발자만 쓰는 파일이라 Release 에 붙이지 않고 Actions 아티팩트로 올린다.
+# Release 에 zip 을 하나 더 붙이면 "어느 걸 받아야 하는지" 혼란이 다시 생기고,
+# update.ps1 이 Release 자산에서 zip 을 골라 받기 때문에 위험하다.
 name: Release ZIP 첨부
 
 on:
@@ -22,26 +30,44 @@ jobs:
         run: echo "version=$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: 확장 파일만 모아 zip 생성
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
         run: |
           set -euo pipefail
-          # 크롬은 manifest.json이 zip 최상위에 있어야 폴더로 인식한다.
+          # 두 zip 이 공유하는 확장 본체
           mkdir -p dist/ssafy-check
           cp manifest.json background.js content.js content.css holidays.js \
              popup.html popup.js welcome.html welcome.css welcome.js \
              dist/ssafy-check/
           cp -r icons dist/ssafy-check/
-          # 업데이트 도구도 함께 넣는다. zip 으로 설치한 사람도 이 파일만
-          # 더블클릭하면 최신 Release 를 받아 덮어쓸 수 있다.
+
+          # 1) 웹스토어 제출용 - manifest.json 이 최상위에 오도록 폴더 안에서 압축한다.
+          #    업데이트 도구를 넣기 "전에" 만들어야 .bat/.ps1 이 섞이지 않는다.
+          ( cd dist/ssafy-check && zip -r "$GITHUB_WORKSPACE/ssafy-check-v${VERSION}-webstore.zip" . )
+
+          # 2) 설치용 - 압축을 풀면 폴더 하나가 나오도록 감싸고, 그 폴더만
+          #    더블클릭으로 갱신할 수 있게 업데이트 도구를 함께 넣는다.
           cp 업데이트.bat update.ps1 dist/ssafy-check/
-          cd dist
-          zip -r "../ssafy-check-v${{ steps.v.outputs.version }}.zip" ssafy-check
-          cd ..
-          unzip -l "ssafy-check-v${{ steps.v.outputs.version }}.zip"
+          ( cd dist && zip -r "$GITHUB_WORKSPACE/ssafy-check-v${VERSION}.zip" ssafy-check )
+
+          echo "── 설치용 ──"
+          unzip -l "ssafy-check-v${VERSION}.zip"
+          echo "── 웹스토어 제출용 ──"
+          unzip -l "ssafy-check-v${VERSION}-webstore.zip"
+
+      - name: 웹스토어 제출용 zip 을 아티팩트로 올리기
+        uses: actions/upload-artifact@v4
+        with:
+          name: webstore-v${{ steps.v.outputs.version }}
+          path: ssafy-check-v${{ steps.v.outputs.version }}-webstore.zip
+          if-no-files-found: error
 
       - name: Release에 첨부
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.v.outputs.version }}
         run: |
+          set -euo pipefail
           TAG="${{ github.event.release.tag_name }}"
           # 수동 실행일 때는 최신 Release에 붙인다.
           if [ -z "$TAG" ]; then
@@ -53,6 +79,6 @@ jobs:
           # 표시될 라벨(#뒤 텍스트)을 붙여 어느 쪽을 받아야 하는지 분명히 한다.
           # 라벨은 화면 표시용이라 실제 파일명과 update.ps1 의 *.zip 매칭에는
           # 영향을 주지 않는다.
-          ZIP="ssafy-check-v${{ steps.v.outputs.version }}.zip"
+          ZIP="ssafy-check-v${VERSION}.zip"
           gh release upload "$TAG" \
             "${ZIP}#⬇️ 설치용 파일 — 이걸 받으세요 (${ZIP})" --clobber

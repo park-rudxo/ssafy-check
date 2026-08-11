@@ -131,7 +131,11 @@ if (Test-GitUpdatable) {
         Fail "GitHub 에 연결하지 못했습니다. 인터넷 연결을 확인해주세요.`n         $($_.Exception.Message)"
     }
 
-    $asset = $rel.assets | Where-Object { $_.name -like "*.zip" } | Select-Object -First 1
+    # 웹스토어 제출용 zip 은 확장 파일만 들어 있고 업데이트 도구가 빠져 있다.
+    # 그걸로 덮어쓰면 다음부터 이 스크립트로 갱신할 수 없게 되므로 제외한다.
+    $asset = $rel.assets |
+             Where-Object { $_.name -like "*.zip" -and $_.name -notlike "*webstore*" } |
+             Select-Object -First 1
     if (-not $asset) {
         Fail "최신 Release 에 zip 파일이 없습니다. Releases 페이지에서 직접 받아주세요.`n         https://github.com/$REPO/releases/latest"
     }
@@ -148,17 +152,21 @@ if (Test-GitUpdatable) {
     $tmp = Join-Path $env:TEMP ("ssafy-check-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $tmp -Force | Out-Null
     $zip = Join-Path $tmp "update.zip"
+    # 압축은 따로 만든 하위 폴더에 푼다. update.zip 과 같은 위치에 풀면 아래
+    # fallback 이 $tmp 를 복사 원본으로 잡았을 때 update.zip 까지 확장 폴더로
+    # 딸려 들어간다.
+    $ext = Join-Path $tmp "extracted"
 
     try {
         Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip `
                           -Headers @{ "User-Agent" = "ssafy-check-updater" }
-        Expand-Archive -Path $zip -DestinationPath $tmp -Force
+        Expand-Archive -Path $zip -DestinationPath $ext -Force
 
         # zip 최상위의 ssafy-check 폴더 안이 실제 확장 파일이다.
-        $src = Join-Path $tmp "ssafy-check"
+        $src = Join-Path $ext "ssafy-check"
         if (-not (Test-Path (Join-Path $src "manifest.json"))) {
             # 구조가 다르면 manifest.json 이 있는 폴더를 찾아본다.
-            $found = Get-ChildItem -Path $tmp -Filter "manifest.json" -Recurse |
+            $found = Get-ChildItem -Path $ext -Filter "manifest.json" -Recurse |
                      Select-Object -First 1
             if (-not $found) { Fail "받은 zip 에서 manifest.json 을 찾지 못했습니다." }
             $src = $found.DirectoryName

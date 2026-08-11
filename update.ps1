@@ -47,6 +47,29 @@ function Get-LocalVersion {
     }
 }
 
+# git pull 로 업데이트할 수 있는 폴더인지 확인한다.
+# .git 이 있다고 무조건 git 경로를 타면 안 된다. GitHub 의 "Source code (zip)"
+# 을 푼 폴더에서 git init 만 해둔 경우처럼, 원격이 없어서 git pull 이 애초에
+# 불가능한 상태가 있다. 그럴 땐 zip 경로로 넘어가야 정상적으로 업데이트된다.
+function Test-GitUpdatable {
+    if (-not (Test-Path (Join-Path $ROOT ".git"))) { return $false }
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Write-Host "  (.git 폴더가 있지만 git 이 설치되어 있지 않아, zip 으로 받습니다)" -ForegroundColor DarkGray
+        return $false
+    }
+    # 현재 브랜치에 추적 중인 원격 브랜치가 있어야 git pull 이 동작한다.
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    git rev-parse --abbrev-ref --symbolic-full-name "@{u}" 2>&1 | Out-Null
+    $hasUpstream = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prev
+
+    if (-not $hasUpstream) {
+        Write-Host "  (.git 폴더가 있지만 연결된 원격이 없어, zip 으로 받습니다)" -ForegroundColor DarkGray
+    }
+    return $hasUpstream
+}
+
 Set-Location $ROOT
 Write-Head "SSAFY 출석 체크 알리미 - 업데이트"
 
@@ -65,11 +88,8 @@ if ($before) {
 }
 Write-Host ""
 
-if (Test-Path (Join-Path $ROOT ".git")) {
+if (Test-GitUpdatable) {
     # ── git 으로 받은 경우 ────────────────────────────────────────────
-    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        Fail "git 폴더인데 git 이 설치되어 있지 않습니다. Git for Windows 를 설치하세요."
-    }
     Write-Host "  git 으로 최신 내용을 받는 중..." -ForegroundColor DarkGray
     Write-Host ""
 

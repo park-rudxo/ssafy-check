@@ -1,5 +1,9 @@
 // popup: 현재 상태 안내 + 개발자 모드(시간/입실상태 오버라이드, 효과 미리보기)
 (() => {
+  // 웹스토어 빌드인지 여부. build-target.js 가 없더라도(로드 실패 등) 기존
+  // 동작인 unpacked 로 떨어지게 두어, 업데이트 UI 가 사라지는 쪽으로 실수하지 않는다.
+  const IS_WEBSTORE = self.BUILD_TARGET === "webstore";
+
   const DEV_DEFAULTS = { enabled: false, time: null, checkedIn: "auto", forceWeekday: false };
   let dev = { ...DEV_DEFAULTS };
 
@@ -317,7 +321,15 @@
       chrome.runtime.sendMessage({ type: "openWelcome" }, () => window.close());
     });
 
-    document.getElementById("check-update").addEventListener("click", checkUpdate);
+    // 웹스토어 빌드에는 업데이트.bat 이 없고 갱신도 크롬이 알아서 하므로
+    // 업데이트 확인 버튼 자체를 두지 않는다. (build-target.js 참고)
+    if (IS_WEBSTORE) {
+      document.getElementById("check-update").hidden = true;
+      // "다운로드 페이지"는 zip 을 받아 설치하는 사람에게만 해당한다.
+      document.getElementById("release-link").textContent = "📢 릴리스 노트 보기";
+    } else {
+      document.getElementById("check-update").addEventListener("click", checkUpdate);
+    }
 
     // 자동 열기 설정
     document.getElementById("auto-open-enabled").addEventListener("change", (e) => {
@@ -468,6 +480,10 @@
   // chrome.runtime.reload()가 디스크에서 다시 읽어들이므로, 사용자가
   // chrome://extensions 까지 갈 필요가 없어진다.
   function checkPendingReload() {
+    // 웹스토어 설치본은 크롬이 확장을 통째로 교체하고 다시 시작하므로
+    // 메모리와 디스크의 버전이 갈릴 일이 없다. 확인할 이유가 없다.
+    if (IS_WEBSTORE) return;
+
     let loaded;
     try {
       loaded = chrome.runtime.getManifest().version;
@@ -517,9 +533,16 @@
       const notesHtml = notes ? `<div class="notes">${escapeHtml(notes)}</div>` : "";
       statusEl.className = "update-status " + (res.isNew ? "has-update" : "ok");
       const head = res.isNew ? `🆕 새 공지: ${escapeHtml(title)}` : `📢 최신 공지: ${escapeHtml(title)}`;
+      // 갱신 방법 안내는 zip 으로 설치한 사람에게만 해당한다. 웹스토어에서는
+      // 업데이트.bat 이 없으므로 안내하면 없는 파일을 가리키게 된다.
+      // (웹스토어 빌드는 버튼 자체가 없어 여기까지 오지 않지만, 나중에 버튼을
+      //  되살리더라도 잘못된 안내가 새어나가지 않도록 여기서도 막아둔다)
+      const hintHtml = IS_WEBSTORE
+        ? ""
+        : `<div class="pull-hint">업데이트: <code>업데이트.bat</code> 실행 후 위에 뜨는 <b>[지금 적용하기]</b></div>`;
       statusEl.innerHTML =
         `${head}${notesHtml}` +
-        `<div class="pull-hint">업데이트: <code>업데이트.bat</code> 실행 후 위에 뜨는 <b>[지금 적용하기]</b></div>` +
+        hintHtml +
         `<div><a href="${res.url}" target="_blank">릴리스 노트 자세히 보기</a></div>`;
     });
   }

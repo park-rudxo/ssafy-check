@@ -80,12 +80,6 @@
     <td>사용자가 해당 사이트를 방문할 때만 동작</td>
   </tr>
   <tr>
-    <td>GitHub Releases API (<code>api.github.com</code>)</td>
-    <td>없음 (공개된 릴리스 정보만 조회)</td>
-    <td>확장 프로그램의 새 버전 출시 여부 확인</td>
-    <td>항상 (읽기 전용 공개 API 호출)</td>
-  </tr>
-  <tr>
     <td>사용자가 직접 등록한 Mattermost Webhook 주소</td>
     <td>입실/퇴실 상태를 요약한 텍스트 메시지</td>
     <td>사용자 본인에게 모바일 푸시로 출석 리마인더 전달</td>
@@ -106,9 +100,16 @@
   <tr><td><code>alarms</code></td><td>매일 08:50 / 17:50에 리마인더를 보내기 위한 타이머</td></tr>
   <tr><td><code>notifications</code></td><td>크롬 알림(입실/퇴실 리마인더)을 화면에 표시</td></tr>
   <tr><td><code>storage</code></td><td>위 2번 항목의 설정값을 브라우저에 로컬 저장</td></tr>
-  <tr><td><code>host_permissions</code> (<code>api.github.com</code>)</td><td>새 버전 릴리스 여부 확인</td></tr>
   <tr><td><code>optional_host_permissions</code> (모든 사이트)</td><td>사용자가 Mattermost 알림을 켤 때, 사용자가 입력한 그 Webhook 주소 하나에만 한해 요청되는 선택적 권한</td></tr>
 </table>
+
+<p class="note">
+  본 방침은 <strong>크롬 웹스토어에서 설치한 버전</strong>을 기준으로 합니다.
+  GitHub 저장소에서 zip 을 내려받아 설치하는 배포본은 새 버전 공지를 확인하기 위해
+  GitHub 의 공개 릴리스 API(<code>api.github.com</code>)를 추가로 조회하며, 이때도
+  전송되는 사용자 정보는 없습니다. 웹스토어 버전은 크롬이 알아서 갱신하므로 이
+  조회를 하지 않고, 해당 권한도 요청하지 않습니다.
+</p>
 
 <h2>5. 제3자 제공</h2>
 <p>본 확장 프로그램은 어떠한 사용자 데이터도 광고, 분석, 또는 그 외 제3자에게 판매·공유·제공하지 않습니다.</p>

@@ -16,14 +16,20 @@
   //   enabled      : 개발자 모드 on/off
   //   time         : 가상 현재 시각(분, 0~1439) / null이면 실제 시각 사용
   //   checkedIn    : "auto" | "true"(입실완료) | "false"(입실전)
-  //   forceWeekday : 주말에도 평일처럼 동작시키기
+  //   forceWeekday : 주말·공휴일에도 평일처럼 동작시키기
   const DEV_DEFAULTS = { enabled: false, time: null, checkedIn: "auto", forceWeekday: false };
   let dev = { ...DEV_DEFAULTS };
 
+  // 쉬는 날 설정: 사용자가 팝업에서 등록한 개인 휴무일(연차·공가)과,
+  // 공휴일 판정을 무시하고 평일로 취급할 날짜.
+  const DAYOFF_DEFAULTS = { offDays: [], workDays: [] };
+  let dayOff = { ...DAYOFF_DEFAULTS };
+
   function loadDevSettings(cb) {
     try {
-      chrome.storage.local.get("ssafyDev", (data) => {
+      chrome.storage.local.get(["ssafyDev", "dayOff"], (data) => {
         dev = { ...DEV_DEFAULTS, ...(data && data.ssafyDev) };
+        dayOff = { ...DAYOFF_DEFAULTS, ...(data && data.dayOff) };
         if (cb) cb();
       });
     } catch (e) {
@@ -33,10 +39,11 @@
 
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === "local" && changes.ssafyDev) {
-        dev = { ...DEV_DEFAULTS, ...changes.ssafyDev.newValue };
-        update();
-      }
+      if (area !== "local") return;
+      if (!changes.ssafyDev && !changes.dayOff) return;
+      if (changes.ssafyDev) dev = { ...DEV_DEFAULTS, ...changes.ssafyDev.newValue };
+      if (changes.dayOff) dayOff = { ...DAYOFF_DEFAULTS, ...changes.dayOff.newValue };
+      update();
     });
   } catch (e) {
     /* storage API 사용 불가 시 실제 시간 기준으로만 동작 */
@@ -98,10 +105,20 @@
     return d.getHours() * 60 + d.getMinutes();
   }
 
-  function isWeekday() {
+  // 출석 체크가 필요한 날인지. 주말·공휴일·개인 휴무일이면 false.
+  // 개발자 모드의 "주말·공휴일에도 평일처럼 동작"은 이 판정을 통째로 무시한다.
+  //
+  // holidays.js 가 없는 상태(압축을 덜 푼 폴더 등)에서도 확장이 통째로 죽지
+  // 않도록 예전 동작(주말만 제외)으로 물러난다. 조용히 아무것도 안 하는 것보다
+  // 헛알림이 낫다는 원칙에 따라, 판정이 불가능하면 "동작하는 쪽"을 고른다.
+  function isWorkday() {
     if (dev.enabled && dev.forceWeekday) return true;
-    const day = serverNow().getDay();
-    return day >= 1 && day <= 5;
+    const now = serverNow();
+    if (typeof SsafyHolidays === "undefined") {
+      const day = now.getDay();
+      return day >= 1 && day <= 5;
+    }
+    return !SsafyHolidays.dayInfo(now, dayOff).off;
   }
 
   // 화면 전체에서 정규식과 일치하는 텍스트를 가진 클릭 가능한 요소를 찾는다.
@@ -546,7 +563,7 @@
 
     // 출석 위젯이 없는 화면(커리큘럼·로그인 등)에서는 상태를 알 수 없으므로
     // 아무것도 표시하지 않는다. (다른 화면에서 "미입실"로 오판하는 문제 방지)
-    if (!isWeekday() || !onAttendancePage()) {
+    if (!isWorkday() || !onAttendancePage()) {
       removeBox("checkin");
       removeBox("checkout");
       hideBanner();

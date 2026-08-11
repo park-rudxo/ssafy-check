@@ -34,21 +34,55 @@ jobs:
           VERSION: ${{ steps.v.outputs.version }}
         run: |
           set -euo pipefail
-          # 두 zip 이 공유하는 확장 본체
-          mkdir -p dist/ssafy-check
-          cp manifest.json background.js content.js content.css holidays.js \
-             popup.html popup.js welcome.html welcome.css welcome.js \
-             dist/ssafy-check/
-          cp -r icons dist/ssafy-check/
+          EXT_FILES="manifest.json background.js content.js content.css holidays.js
+                     build-target.js popup.html popup.js welcome.html welcome.css welcome.js"
 
-          # 1) 웹스토어 제출용 - manifest.json 이 최상위에 오도록 폴더 안에서 압축한다.
-          #    업데이트 도구를 넣기 "전에" 만들어야 .bat/.ps1 이 섞이지 않는다.
-          ( cd dist/ssafy-check && zip -r "$GITHUB_WORKSPACE/ssafy-check-v${VERSION}-webstore.zip" . )
+          # 두 빌드는 같은 소스에서 나온다. 차이는 아래에서 주는 것뿐이다.
+          mkdir -p dist/webstore dist/ssafy-check
+          for d in dist/webstore dist/ssafy-check; do
+            cp $EXT_FILES "$d/"
+            cp -r icons "$d/"
+          done
 
-          # 2) 설치용 - 압축을 풀면 폴더 하나가 나오도록 감싸고, 그 폴더만
-          #    더블클릭으로 갱신할 수 있게 업데이트 도구를 함께 넣는다.
+          # ── 웹스토어 빌드에만 주는 차이 ──────────────────────────────
+          # 1) 업데이트 UI 를 끈다. 크롬이 알아서 갱신하고, 업데이트.bat 이
+          #    들어 있지도 않아서 그걸 실행하라는 안내가 남으면 안 된다.
+          echo 'self.BUILD_TARGET = "webstore";' > dist/webstore/build-target.js
+          # 2) 릴리스 확인을 하지 않으므로 GitHub 호스트 권한을 뺀다.
+          #    권한이 줄면 심사도, 설치 시 사용자에게 보이는 안내도 깔끔해진다.
+          node -e '
+            const fs = require("fs");
+            const p = "dist/webstore/manifest.json";
+            const m = JSON.parse(fs.readFileSync(p, "utf8"));
+            delete m.host_permissions;
+            fs.writeFileSync(p, JSON.stringify(m, null, 2) + "\n");
+          '
+
+          # 웹스토어는 manifest.json 이 zip 최상위에 있어야 한다.
+          ( cd dist/webstore && zip -r "$GITHUB_WORKSPACE/ssafy-check-v${VERSION}-webstore.zip" . )
+
+          # 설치용은 압축을 풀면 폴더 하나가 나오도록 감싸고, 그 폴더만
+          # 더블클릭으로 갱신할 수 있게 업데이트 도구를 함께 넣는다.
           cp 업데이트.bat update.ps1 dist/ssafy-check/
           ( cd dist && zip -r "$GITHUB_WORKSPACE/ssafy-check-v${VERSION}.zip" ssafy-check )
+
+          # 웹스토어 빌드에 업데이트 도구나 GitHub 권한이 새어 들어가면
+          # 심사에서 지적받으므로, 빌드가 조용히 잘못되지 않도록 여기서 막는다.
+          if unzip -l "ssafy-check-v${VERSION}-webstore.zip" | grep -qE '업데이트\.bat|update\.ps1'; then
+            echo "::error::웹스토어 zip 에 업데이트 도구가 들어갔습니다."; exit 1
+          fi
+          # optional_host_permissions 도 이름에 host_permissions 를 품고 있어
+          # grep 으로는 구분되지 않는다. 키를 직접 확인한다.
+          node -e '
+            const m = require("./dist/webstore/manifest.json");
+            if (m.host_permissions) {
+              console.error("::error::웹스토어 manifest 에 host_permissions 가 남아 있습니다.");
+              process.exit(1);
+            }
+          '
+          if ! grep -q 'BUILD_TARGET = "webstore"' dist/webstore/build-target.js; then
+            echo "::error::웹스토어 빌드 표시가 적용되지 않았습니다."; exit 1
+          fi
 
           echo "── 설치용 ──"
           unzip -l "ssafy-check-v${VERSION}.zip"

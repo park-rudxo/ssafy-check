@@ -7,6 +7,15 @@
 // 릴리즈 확인 자체는 평일 08:45~18:00 사이 15분 간격으로 조용히 수행하고,
 // 새 릴리즈가 있을 때만(3번) 알림을 띄운다.
 
+// 배포 대상(unpacked / webstore)을 읽는다. 읽지 못하면 기존 동작인 unpacked로
+// 둔다 - 업데이트 확인이 도는 쪽이라, 잘못돼도 기능이 사라지지는 않는다.
+try {
+  importScripts("build-target.js");
+} catch (e) {
+  self.BUILD_TARGET = "unpacked";
+}
+const IS_WEBSTORE = self.BUILD_TARGET === "webstore";
+
 // 공휴일 판정은 content.js/popup.js와 같은 규칙을 써야 하므로 공용 모듈을 불러온다.
 // 파일이 없으면 importScripts가 서비스워커를 통째로 죽이므로, 그 경우엔
 // 예전 동작(주말만 제외)으로 물러나 알림 기능 자체는 살려 둔다.
@@ -84,7 +93,11 @@ function scheduleAll() {
   // 15분마다 알람이 울린다(예약 시점과 무관하게 몇 분 안에 첫 알람이 옴).
   // 실제 확인은 isWithinCheckWindow()로 평일 08:45~18:00 사이에만 조용히
   // 수행하고, 그 밖의 시간엔 알람만 울리고 건너뛴다.
-  chrome.alarms.create(UPDATE_ALARM, { when: nextIntervalBoundary(15), periodInMinutes: 15 });
+  // 웹스토어 빌드는 크롬이 알아서 갱신하므로 이 확인 자체가 필요 없다.
+  // (그래서 manifest 에서 api.github.com 호스트 권한도 함께 빠진다)
+  if (!IS_WEBSTORE) {
+    chrome.alarms.create(UPDATE_ALARM, { when: nextIntervalBoundary(15), periodInMinutes: 15 });
+  }
   scheduleAutoOpen();
   scheduleMattermostWarnings();
 }
@@ -402,7 +415,11 @@ function truncate(str, n) {
 }
 
 // 최신 Release 정보를 가져온다. 발행된 Release가 없으면 { none: true }.
+// api.github.com 을 호출하는 곳은 여기 하나뿐이다. 웹스토어 빌드는 여기서
+// 바로 돌아서므로 호출이 아예 일어나지 않고, 그래서 manifest 에서 해당
+// 호스트 권한을 빼도 안전하다.
 async function fetchLatestRelease() {
+  if (IS_WEBSTORE) return { none: true };
   try {
     const res = await fetch(RELEASES_API, { headers: { Accept: "application/vnd.github+json" } });
     if (res.status === 404) return { none: true }; // 아직 발행된 Release 없음

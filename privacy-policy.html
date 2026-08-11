@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>개인정보처리방침 - SSAFY 출석 체크 알리미</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 40px 20px 80px;
+    line-height: 1.7;
+    color: #1c1c1c;
+    background: #ffffff;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 4px; }
+  .updated { color: #666; font-size: 0.9rem; margin-bottom: 32px; }
+  h2 { font-size: 1.15rem; margin-top: 36px; border-bottom: 1px solid #e5e5e5; padding-bottom: 6px; }
+  ul { padding-left: 22px; }
+  li { margin: 6px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.95rem; }
+  th, td { border: 1px solid #ddd; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f5f5f5; }
+  code { background: #f2f2f2; padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+  a { color: #1a5fb4; }
+  .note {
+    background: #f7f7f7;
+    border-left: 3px solid #999;
+    padding: 10px 14px;
+    margin: 16px 0;
+    font-size: 0.95rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #121212; color: #e6e6e6; }
+    .updated { color: #999; }
+    h2 { border-bottom-color: #333; }
+    th, td { border-color: #333; }
+    th { background: #1e1e1e; }
+    code { background: #1e1e1e; }
+    .note { background: #1a1a1a; border-left-color: #666; }
+    a { color: #7aa7e8; }
+  }
+</style>
+</head>
+<body>
+
+<h1>개인정보처리방침</h1>
+<p class="updated">SSAFY 출석 체크 알리미 (Chrome 확장 프로그램) &middot; 시행일: 2026-08-11</p>
+
+<p>
+  "SSAFY 출석 체크 알리미"(이하 "본 확장 프로그램")는 SSAFY 교육생의 입실·퇴실 체크를 돕기 위한
+  Chrome 확장 프로그램입니다. 본 방침은 본 확장 프로그램이 어떤 정보를 다루는지, 그 정보를
+  어디에 저장하고 누구에게 전달하는지를 설명합니다.
+</p>
+
+<h2>1. 개발자가 수집하는 정보</h2>
+<p><strong>없습니다.</strong> 본 확장 프로그램의 개발자는 서버를 운영하지 않으며,
+사용자의 어떤 정보도 개발자에게 전송·수집·저장되지 않습니다.</p>
+
+<h2>2. 브라우저에 저장되는 정보</h2>
+<p>아래 정보는 모두 사용자의 브라우저 안(<code>chrome.storage.local</code>)에만 저장되며,
+외부로 전송되지 않습니다.</p>
+<ul>
+  <li>오늘 입실/퇴실 체크 버튼을 눌렀는지 여부 및 시각 (기기 로컬 판단용)</li>
+  <li>사용자가 직접 등록한 휴무일 목록</li>
+  <li>Mattermost 알림 사용 여부, 채널명 등 사용자가 입력한 설정값</li>
+  <li>확장 프로그램 업데이트 공지를 확인했는지 여부</li>
+</ul>
+<p>이 데이터는 사용자가 확장 프로그램을 삭제하면 함께 삭제됩니다.</p>
+
+<h2>3. 외부로 전송되는 정보</h2>
+<table>
+  <tr><th>전송 대상</th><th>전송 정보</th><th>목적</th><th>조건</th></tr>
+  <tr>
+    <td>SSAFY 홈페이지 (<code>edu.ssafy.com</code>)</td>
+    <td>없음 (페이지 내용을 읽기만 함)</td>
+    <td>입실/퇴실 버튼 강조 표시, 서버 기록 시각 확인</td>
+    <td>사용자가 해당 사이트를 방문할 때만 동작</td>
+  </tr>
+  <tr>
+    <td>GitHub Releases API (<code>api.github.com</code>)</td>
+    <td>없음 (공개된 릴리스 정보만 조회)</td>
+    <td>확장 프로그램의 새 버전 출시 여부 확인</td>
+    <td>항상 (읽기 전용 공개 API 호출)</td>
+  </tr>
+  <tr>
+    <td>사용자가 직접 등록한 Mattermost Webhook 주소</td>
+    <td>입실/퇴실 상태를 요약한 텍스트 메시지</td>
+    <td>사용자 본인에게 모바일 푸시로 출석 리마인더 전달</td>
+    <td>사용자가 설정 화면에서 Webhook 주소를 직접 입력하고
+        기능을 켰을 때만 동작. 기본값은 꺼짐</td>
+  </tr>
+</table>
+
+<p class="note">
+  Mattermost 연동은 사용자가 자신이 소유/관리하는 Mattermost 서버의 Incoming Webhook 주소를
+  직접 입력해야만 동작합니다. 개발자는 이 주소나 전송되는 메시지 내용을 확인하거나 보관하지 않으며,
+  메시지는 사용자의 브라우저에서 사용자가 입력한 주소로 직접(peer-to-peer) 전송됩니다.
+</p>
+
+<h2>4. 요청하는 권한과 사용 목적</h2>
+<table>
+  <tr><th>권한</th><th>사용 목적</th></tr>
+  <tr><td><code>alarms</code></td><td>매일 08:50 / 17:50에 리마인더를 보내기 위한 타이머</td></tr>
+  <tr><td><code>notifications</code></td><td>크롬 알림(입실/퇴실 리마인더)을 화면에 표시</td></tr>
+  <tr><td><code>storage</code></td><td>위 2번 항목의 설정값을 브라우저에 로컬 저장</td></tr>
+  <tr><td><code>host_permissions</code> (<code>api.github.com</code>)</td><td>새 버전 릴리스 여부 확인</td></tr>
+  <tr><td><code>optional_host_permissions</code> (모든 사이트)</td><td>사용자가 Mattermost 알림을 켤 때, 사용자가 입력한 그 Webhook 주소 하나에만 한해 요청되는 선택적 권한</td></tr>
+</table>
+
+<h2>5. 제3자 제공</h2>
+<p>본 확장 프로그램은 어떠한 사용자 데이터도 광고, 분석, 또는 그 외 제3자에게 판매·공유·제공하지 않습니다.</p>
+
+<h2>6. 아동 개인정보</h2>
+<p>본 확장 프로그램은 SSAFY 교육생(성인)을 대상으로 하며, 만 14세 미만 아동을 대상으로 하지 않습니다.</p>
+
+<h2>7. 방침 변경</h2>
+<p>본 방침이 변경되는 경우 이 페이지를 통해 공지하며, 변경 시 상단의 시행일이 갱신됩니다.</p>
+
+<h2>8. 문의</h2>
+<p>
+  본 확장 프로그램 및 개인정보 처리에 대한 문의는 아래로 연락해 주세요.<br />
+  이메일: <a href="mailto:corqjffp010@gmail.com">corqjffp010@gmail.com</a><br />
+  저장소: <a href="https://github.com/park-rudxo/ssafy-check">github.com/park-rudxo/ssafy-check</a>
+</p>
+
+</body>
+</html>

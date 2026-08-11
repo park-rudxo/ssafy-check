@@ -48,5 +48,11 @@ jobs:
             TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName')
           fi
           echo "대상 Release: $TAG"
+          # GitHub 은 "Source code (zip)" 를 항상 자동으로 붙이고 숨길 수 없다.
+          # 사용자가 그걸 잘못 받는 일이 실제로 있었으므로, 파일명 대신
+          # 표시될 라벨(#뒤 텍스트)을 붙여 어느 쪽을 받아야 하는지 분명히 한다.
+          # 라벨은 화면 표시용이라 실제 파일명과 update.ps1 의 *.zip 매칭에는
+          # 영향을 주지 않는다.
+          ZIP="ssafy-check-v${{ steps.v.outputs.version }}.zip"
           gh release upload "$TAG" \
-            "ssafy-check-v${{ steps.v.outputs.version }}.zip" --clobber
+            "${ZIP}#⬇️ 설치용 파일 — 이걸 받으세요 (${ZIP})" --clobber

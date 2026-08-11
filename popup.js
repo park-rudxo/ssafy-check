@@ -16,6 +16,11 @@
   };
   let mm = { ...MM_DEFAULTS };
 
+  // offDays  : 사용자가 등록한 개인 휴무일(연차·공가 등)
+  // workDays : 공휴일이지만 평일로 취급할 날 (공휴일 표가 틀렸을 때의 탈출구)
+  const DAYOFF_DEFAULTS = { offDays: [], workDays: [] };
+  let dayOff = { ...DAYOFF_DEFAULTS };
+
   // ── 시간 변환 유틸 ─────────────────────────────────────────────────
   function hhmmToMinutes(str) {
     const m = /^(\d{1,2}):(\d{2})$/.exec(str || "");
@@ -33,16 +38,17 @@
   function renderStatus() {
     const statusEl = document.getElementById("status");
     const now = new Date();
-    const realWeekend = now.getDay() === 0 || now.getDay() === 6;
+    const info = SsafyHolidays.dayInfo(now, dayOff);
 
     const usingDevTime = dev.enabled && dev.time != null;
     const minutes = usingDevTime ? dev.time : now.getHours() * 60 + now.getMinutes();
-    const weekend = dev.enabled && dev.forceWeekday ? false : realWeekend;
+    const off = dev.enabled && dev.forceWeekday ? false : info.off;
     const tag = dev.enabled ? " (미리보기)" : "";
 
-    if (weekend) {
+    if (off) {
       statusEl.className = "status idle";
-      statusEl.textContent = "😴 오늘은 주말입니다." + tag;
+      const what = info.reason === "personal" ? "등록해둔 휴무일" : info.label;
+      statusEl.textContent = `😴 오늘은 ${what}입니다.` + tag;
     } else if (minutes < 9 * 60) {
       const left = 9 * 60 - minutes;
       statusEl.className = "status danger";
@@ -99,6 +105,82 @@
       chrome.storage.local.set({ autoOpen: autoOpen }, renderAutoOpen);
     } catch (e) {
       renderAutoOpen();
+    }
+  }
+
+  // ── 쉬는 날 ────────────────────────────────────────────────────────
+  function saveDayOff() {
+    try {
+      chrome.storage.local.set({ dayOff: dayOff }, () => {
+        renderDayOff();
+        renderStatus();
+      });
+    } catch (e) {
+      renderDayOff();
+      renderStatus();
+    }
+  }
+
+  function renderDayOff() {
+    const todayKey = SsafyHolidays.toKey(new Date());
+    const info = SsafyHolidays.dayInfo(new Date(), dayOff);
+    const box = document.getElementById("dayoff-today");
+
+    box.classList.toggle("off", info.off);
+    box.textContent = "";
+
+    if (info.reason === "holiday") {
+      box.append(`오늘은 ${info.label}입니다. 강조와 알림이 꺼져 있어요. `);
+      // 표가 틀렸거나 공휴일에도 출석해야 하는 경우를 위한 탈출구.
+      const btn = document.createElement("button");
+      btn.className = "btn-small";
+      btn.textContent = "그래도 오늘 출석함";
+      btn.addEventListener("click", () => {
+        dayOff.workDays = [...new Set([...dayOff.workDays, todayKey])];
+        saveDayOff();
+      });
+      box.append(btn);
+    } else if (info.reason === "personal") {
+      box.append("오늘은 등록해둔 휴무일이라 강조와 알림이 꺼져 있어요.");
+    } else if (info.reason === "weekend") {
+      box.append(`오늘은 ${info.label}이라 강조와 알림이 꺼져 있어요.`);
+    } else if (dayOff.workDays.includes(todayKey)) {
+      box.append("오늘은 공휴일이지만 평일로 취급하고 있어요. ");
+      const btn = document.createElement("button");
+      btn.className = "btn-small";
+      btn.textContent = "되돌리기";
+      btn.addEventListener("click", () => {
+        dayOff.workDays = dayOff.workDays.filter((d) => d !== todayKey);
+        saveDayOff();
+      });
+      box.append(btn);
+    } else if (!SsafyHolidays.isCovered(todayKey)) {
+      // 공휴일 표에 없는 연도. 조용히 넘어가면 공휴일에 헛알림이 가므로 알려준다.
+      box.append(
+        `${SsafyHolidays.coveredYears.max}년까지의 공휴일만 알고 있어요. ` +
+          "확장을 업데이트하거나, 쉬는 날을 아래에 직접 등록해 주세요."
+      );
+    } else {
+      box.append("오늘은 출석 체크가 필요한 날입니다.");
+    }
+
+    // 지난 날짜는 의미가 없으므로 정리하면서 그린다.
+    const upcoming = dayOff.offDays.filter((d) => d >= todayKey).sort();
+    const list = document.getElementById("dayoff-list");
+    list.textContent = "";
+    for (const d of upcoming) {
+      const chip = document.createElement("span");
+      chip.className = "dayoff-chip";
+      chip.append(d === todayKey ? `${d} (오늘)` : d);
+      const del = document.createElement("button");
+      del.textContent = "×";
+      del.title = "삭제";
+      del.addEventListener("click", () => {
+        dayOff.offDays = dayOff.offDays.filter((x) => x !== d);
+        saveDayOff();
+      });
+      chip.append(del);
+      list.append(chip);
     }
   }
 
@@ -249,6 +331,18 @@
       e.target.value = n;
       autoOpen.minutesBefore = n;
       saveAutoOpen();
+    });
+
+    // 쉬는 날 등록
+    const dayoffDate = document.getElementById("dayoff-date");
+    dayoffDate.value = SsafyHolidays.toKey(new Date());
+    document.getElementById("dayoff-add").addEventListener("click", () => {
+      const v = dayoffDate.value;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
+      dayOff.offDays = [...new Set([...dayOff.offDays, v])];
+      // 평일 취급 예외와 동시에 등록되면 헷갈리므로 정리한다.
+      dayOff.workDays = dayOff.workDays.filter((d) => d !== v);
+      saveDayOff();
     });
 
     // Mattermost 설정
@@ -450,13 +544,14 @@
       document.getElementById("version-label").textContent = "";
     }
     try {
-      chrome.storage.local.get(["ssafyDev", "autoOpen", "mattermost"], (data) => {
+      chrome.storage.local.get(["ssafyDev", "autoOpen", "mattermost", "dayOff"], (data) => {
         dev = { ...DEV_DEFAULTS, ...(data && data.ssafyDev) };
         // 켜진 상태인데 time이 비어 있으면 기본 가상 시각으로 채운다.
         if (dev.enabled && dev.time == null) dev.time = hhmmToMinutes("08:30");
         if (dev.enabled) openDevSection();
         autoOpen = { ...AUTO_OPEN_DEFAULTS, ...(data && data.autoOpen) };
         mm = { ...MM_DEFAULTS, ...(data && data.mattermost) };
+        dayOff = { ...DAYOFF_DEFAULTS, ...(data && data.dayOff) };
         if (mm.enabled) {
           document.getElementById("mm-body").classList.add("open");
           document.getElementById("mm-header").classList.add("open");
@@ -465,12 +560,14 @@
         renderDevControls();
         renderAutoOpen();
         renderMattermost();
+        renderDayOff();
       });
     } catch (e) {
       renderStatus();
       renderDevControls();
       renderAutoOpen();
       renderMattermost();
+      renderDayOff();
     }
   }
 

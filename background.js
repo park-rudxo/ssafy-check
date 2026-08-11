@@ -7,6 +7,20 @@
 // 릴리즈 확인 자체는 평일 08:45~18:00 사이 15분 간격으로 조용히 수행하고,
 // 새 릴리즈가 있을 때만(3번) 알림을 띄운다.
 
+// 공휴일 판정은 content.js/popup.js와 같은 규칙을 써야 하므로 공용 모듈을 불러온다.
+// 파일이 없으면 importScripts가 서비스워커를 통째로 죽이므로, 그 경우엔
+// 예전 동작(주말만 제외)으로 물러나 알림 기능 자체는 살려 둔다.
+try {
+  importScripts("holidays.js");
+} catch (e) {
+  self.SsafyHolidays = {
+    dayInfo(d) {
+      const day = (typeof d === "string" ? new Date(d) : d).getDay();
+      return day === 0 || day === 6 ? { off: true, reason: "weekend", label: "주말" } : { off: false, reason: null, label: null };
+    },
+  };
+}
+
 const REPO = "park-rudxo/ssafy-check";
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 const RELEASES_PAGE = `https://github.com/${REPO}/releases`;
@@ -131,6 +145,20 @@ function todayStr(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// ── 쉬는 날 판정 ──────────────────────────────────────────────────────
+// 주말 + 공휴일 + 사용자가 등록한 개인 휴무일(연차·공가 등)을 모두 쉬는 날로 본다.
+// 알림·자동 열기는 전부 이 함수 하나를 통과한다.
+const DAYOFF_DEFAULT = { offDays: [], workDays: [] };
+
+async function getDayOffSettings() {
+  const { dayOff } = await chrome.storage.local.get("dayOff");
+  return { ...DAYOFF_DEFAULT, ...(dayOff || {}) };
+}
+
+async function isDayOff(d = new Date()) {
+  return SsafyHolidays.dayInfo(d, await getDayOffSettings()).off;
+}
+
 function hhmm(totalMin) {
   return `${String(Math.floor(totalMin / 60)).padStart(2, "0")}:${String(totalMin % 60).padStart(2, "0")}`;
 }
@@ -249,8 +277,7 @@ async function handleAttendanceObserved(msg) {
 
 // 미체크 경고는 일부러 매번 보낸다(점점 촘촘해지는 리마인더라 중복이 아님).
 async function handleMattermostWarning(totalMin) {
-  const day = new Date().getDay();
-  if (day === 0 || day === 6) return;
+  if (await isDayOff()) return; // 주말·공휴일·개인 휴무일에는 경고하지 않는다
 
   const s = await getMattermost();
   if (!s.enabled || !s.webhookUrl || !s.notifyMissing) return;
@@ -330,28 +357,28 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     return;
   }
 
-  // 입실/퇴실 N분 전 → SSAFY 홈 자동 열기 (평일만)
+  // 입실/퇴실 N분 전 → SSAFY 홈 자동 열기 (쉬는 날 제외)
   if (alarm.name === OPEN_CHECKIN_ALARM || alarm.name === OPEN_CHECKOUT_ALARM) {
-    const day = new Date().getDay();
-    if (day === 0 || day === 6) return;
-    chrome.tabs.create({ url: SSAFY_HOME });
+    isDayOff().then((off) => {
+      if (!off) chrome.tabs.create({ url: SSAFY_HOME });
+    });
     return;
   }
 
   const reminder = REMINDERS.find((r) => r.name === alarm.name);
   if (!reminder) return;
 
-  // 주말에는 리마인더 알림을 보내지 않는다.
-  const day = new Date().getDay();
-  if (day === 0 || day === 6) return;
-
-  chrome.notifications.create(reminder.name + "-" + Date.now(), {
-    type: "basic",
-    iconUrl: "icons/icon128.png",
-    title: reminder.title,
-    message: reminder.message,
-    priority: 2,
-    requireInteraction: true,
+  // 주말·공휴일·개인 휴무일에는 리마인더 알림을 보내지 않는다.
+  isDayOff().then((off) => {
+    if (off) return;
+    chrome.notifications.create(reminder.name + "-" + Date.now(), {
+      type: "basic",
+      iconUrl: "icons/icon128.png",
+      title: reminder.title,
+      message: reminder.message,
+      priority: 2,
+      requireInteraction: true,
+    });
   });
 });
 

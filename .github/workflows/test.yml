@@ -1,0 +1,26 @@
+# 강조 박스 회귀 테스트. 실제 크로미움에 content.js 를 올려 동작을 확인한다.
+name: 테스트
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 크로미움 설치
+        run: npx playwright install --with-deps chromium
+
+      - name: 테스트
+        run: npm test

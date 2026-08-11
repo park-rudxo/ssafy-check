@@ -1,0 +1,11 @@
+{
+  "name": "ssafy-check",
+  "private": true,
+  "description": "SSAFY 출석 체크 알리미 - 크롬 익스텐션의 회귀 테스트용 설정",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  }
+}

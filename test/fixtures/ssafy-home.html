@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<!--
+  SSAFY 홈(edu.ssafy.com)의 출석 위젯을 흉내 낸 테스트용 페이지.
+
+  실제 구조는 content.js 상단 주석과 README 에 적혀 있는 그대로다.
+    <div class="wrap-going">
+      <div class="state inRoomEnd"><span><span class="t1">08:16</span> 정상 출석</span></div>
+      <div class="state2 outRoomEnd"><a id="checkOut"><span class="t1">14:00</span>퇴실하기</a></div>
+    </div>
+
+  두 가지가 이 fixture 의 핵심이다.
+   - 입실 후에는 <a> 가 없고 "정상 출석" 문구만 남는다 (퇴실 칸에는 <a> 가 남는다)
+   - 상단 메뉴에 "마이캠퍼스" 같은 링크가 있다. 강조 박스가 발산하면 이 위로
+     기어올라가므로, 실제로 문제가 났던 화면을 그대로 재현하려면 필요하다
+-->
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>SSAFY 홈 (테스트용)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; }
+  nav { background: #fff; border-bottom: 1px solid #ddd; padding: 14px 20px; display: flex; gap: 28px; }
+  nav a { text-decoration: none; color: #333; font-weight: 600; }
+  .card { background: #ffe14d; width: 360px; margin: 60px 20px; padding: 24px; border-radius: 12px; }
+  .wrap-going { display: flex; gap: 10px; margin-top: 16px; }
+  .state, .state2 { background: #8a8a8a; color: #fff; padding: 12px 14px; border-radius: 8px;
+                    text-align: center; min-width: 70px; }
+  .state2 a { color: #fff; text-decoration: none; display: block; }
+  .t1 { display: block; font-size: 15px; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="#">마이캠퍼스</a>
+  <a href="#">강의실</a>
+  <a href="#">커뮤니티</a>
+  <a href="#">HELP DESK</a>
+  <a href="#">멘토링 게시판</a>
+</nav>
+
+<div class="card">
+  <h2>출석체크 &amp; 현황</h2>
+  <div>08. 11 화요일</div>
+
+  <div class="wrap-going">
+    <div class="state inRoomEnd"><span><span class="t1">08:16</span> 정상 출석</span></div>
+    <div class="state2 outRoomEnd"><a id="checkOut"><span class="t1">14:00</span>퇴실하기</a></div>
+  </div>
+</div>
+
+</body>
+</html>

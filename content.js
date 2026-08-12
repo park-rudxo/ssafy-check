@@ -9,6 +9,9 @@
   const CHECK_IN_DEADLINE_MIN = 9 * 60; // 09:00
   const CHECK_OUT_START_MIN = 18 * 60; // 18:00
   const BANNER_ID = "ssafy-alert-banner";
+  const BOX_CLASS = "ssafy-alert-box";
+  // 우리가 페이지에 그려 넣은 것들. 페이지 텍스트를 훑을 때 반드시 제외해야 한다.
+  const OURS_SELECTOR = "#" + BANNER_ID + ", ." + BOX_CLASS;
 
   // ── 개발자 모드 설정 ─────────────────────────────────────────────────
   // popup에서 chrome.storage.local에 저장한 값을 읽어, 시간/입실상태/요일을
@@ -121,6 +124,15 @@
     return !SsafyHolidays.dayInfo(now, dayOff).off;
   }
 
+  // 우리가 그려 넣은 요소(배너·강조 박스·라벨)인지 확인한다.
+  // 이걸 빼먹으면, 우리 라벨에 적힌 "입실 체크!" 같은 문구를 페이지의 문구로
+  // 착각해 박스가 자기 라벨을 강조 대상으로 잡는다. 그러면 박스 크기가 라벨에
+  // 맞춰지고 라벨은 다시 박스 위쪽에 붙으면서, 매 갱신마다 박스가 조금씩
+  // 커지며 위로 기어올라간다.
+  function isOurs(el) {
+    return !!(el && el.closest && el.closest(OURS_SELECTOR));
+  }
+
   // 화면 전체에서 정규식과 일치하는 텍스트를 가진 클릭 가능한 요소를 찾는다.
   // SSAFY 페이지 구조가 바뀌어도 동작하도록 텍스트 기반으로 탐색한다.
   function findClickableByText(regex) {
@@ -135,8 +147,8 @@
     while (walker.nextNode()) {
       const el = walker.currentNode.parentElement;
       if (!el) continue;
-      // 우리가 만든 배너 안의 텍스트는 제외
-      if (el.closest("#" + BANNER_ID)) continue;
+      // 우리가 그려 넣은 배너·강조 박스 안의 텍스트는 제외
+      if (isOurs(el)) continue;
       const clickable = el.closest('button, a, input[type="button"], input[type="submit"], [role="button"], [onclick]');
       if (clickable && isVisible(clickable)) return clickable;
       if (isVisible(el)) return el;
@@ -151,11 +163,13 @@
 
   // 텍스트 존재 여부만 확인 (상태 판별용)
   function pageHasText(regex) {
-    const banner = document.getElementById(BANNER_ID);
-    const bodyText = document.body.innerText || "";
-    const bannerText = banner ? banner.innerText : "";
-    // 배너 문구 때문에 오탐이 나지 않도록 배너 텍스트는 제거
-    const text = bannerText ? bodyText.replace(bannerText, "") : bodyText;
+    let text = document.body.innerText || "";
+    // 우리가 쓴 문구를 페이지의 문구로 착각하지 않도록 배너와 강조 박스의
+    // 텍스트를 걷어낸다. 배너만 빼면 박스 라벨이 그대로 남아 오탐이 난다.
+    document.querySelectorAll(OURS_SELECTOR).forEach((el) => {
+      const t = el.innerText;
+      if (t) text = text.split(t).join("");
+    });
     return regex.test(text);
   }
 
@@ -176,7 +190,12 @@
   // 입실 칸: 입실 전이면 "입실하기", 입실 후면 "정상 출석"이 표시되는
   // 왼쪽 셀. 퇴실 칸과 같은 크기의 버튼 셀 하나에만 박스가 맞도록 한다.
   function findCheckInButton() {
-    const el = findClickableByText(/입실\s*(하기|체크)?/) || findClickableByText(/정상\s*출석/);
+    // 정확한 문구를 먼저 찾는다. "입실" 만으로 찾으면 "입실 현황" 같은 다른
+    // 문구에도 걸려 엉뚱한 곳을 강조하게 되므로, 느슨한 검색은 최후에만 쓴다.
+    const el =
+      findClickableByText(/입실\s*(하기|체크)/) ||
+      findClickableByText(/정상\s*출석/) ||
+      findClickableByText(/입실/);
     if (!el) return null;
     // 이미 클릭 가능한 셀이면 그대로, 아니면 셀 크기까지 올라가서 감싼다.
     if (el.matches && el.matches('button, a, [role="button"], [onclick]')) return el;
@@ -266,10 +285,15 @@
       removeBox(id);
       return;
     }
+    // 우리 박스나 라벨을 대상으로 잡으면, 박스가 자기 크기를 다시 재면서
+    // 갱신할 때마다 커지고 위로 밀려 올라간다. isOurs() 로 텍스트 검색에서
+    // 이미 걸러내지만, 다른 경로로 새어 들어오더라도 여기서 끊는다.
+    // 갱신을 건너뛸 뿐 기존 박스는 그대로 둬서 경고가 사라지지 않게 한다.
+    if (isOurs(target)) return;
     let entry = boxes.get(id);
     if (!entry) {
       const el = document.createElement("div");
-      el.className = "ssafy-alert-box";
+      el.className = BOX_CLASS;
       const lbl = document.createElement("div");
       lbl.className = "ssafy-alert-box-label";
       el.appendChild(lbl);

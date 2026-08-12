@@ -1,0 +1,3 @@
+node_modules/
+# 테스트 실패 시 남기는 스크린샷
+test/artifacts/

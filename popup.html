@@ -373,18 +373,11 @@
 
       <div class="mm-controls" id="mm-controls">
         <div class="field">
-          <span class="field-label">Incoming Webhook URL</span>
-          <input type="url" id="mm-url" placeholder="https://.../hooks/xxxxxxxxxx" />
-          <div class="time-hint">Mattermost → 통합 → Incoming Webhook에서 만든 URL</div>
-        </div>
-
-        <div class="field">
-          <span class="field-label">받을 곳</span>
+          <span class="field-label">받을 곳 (필수)</span>
           <input type="text" id="mm-channel" placeholder="@내아이디" />
           <div class="time-hint">
-            <b>@내아이디</b>를 넣으면 개인 메시지(DM)로 옵니다. DM은 폰 푸시가 기본으로 와서
-            혼자 받을 땐 이게 제일 확실해요. 채널명(<code>town-square</code>)도 됩니다.
-            비워두면 Webhook에 설정된 채널로 갑니다.
+            <b>반드시 자기 아이디만 넣으세요.</b> 남의 아이디를 넣으면 그 사람에게 갑니다.
+            (Mattermost 프로필의 영문 사용자명)
           </div>
         </div>
 
@@ -469,6 +462,7 @@
 
   <script src="build-target.js"></script>
   <script src="holidays.js"></script>
+  <script src="mattermost.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

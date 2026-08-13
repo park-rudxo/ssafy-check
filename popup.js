@@ -12,7 +12,6 @@
 
   const MM_DEFAULTS = {
     enabled: false,
-    webhookUrl: "",
     channel: "",
     notifyCheckin: true,
     notifyCheckout: true,
@@ -191,12 +190,17 @@
   // ── Mattermost ─────────────────────────────────────────────────────
   function renderMattermost() {
     document.getElementById("mm-enabled").checked = mm.enabled;
-    document.getElementById("mm-url").value = mm.webhookUrl;
     document.getElementById("mm-channel").value = mm.channel;
     document.getElementById("mm-checkin").checked = mm.notifyCheckin;
     document.getElementById("mm-checkout").checked = mm.notifyCheckout;
     document.getElementById("mm-missing").checked = mm.notifyMissing;
     document.getElementById("mm-controls").classList.toggle("disabled", !mm.enabled);
+
+    // 예전 버전에서 받을 곳을 비운 채 켜둔 설정이 남아 있으면 지금은 아무것도
+    // 보내지 않는다. 조용히 안 오는 것보다 이유를 알려주는 편이 낫다.
+    if (mm.enabled && !SsafyMattermost.isValidTarget(mm.channel)) {
+      setMmStatus("받을 곳에 @내아이디를 입력해야 메시지가 갑니다.", "err");
+    }
   }
 
   function saveMattermost() {
@@ -213,26 +217,12 @@
     el.textContent = text;
   }
 
-  // Webhook 호스트는 사용자마다 달라서 manifest에 미리 넣을 수 없다.
-  // optional_host_permissions로 두고, URL을 넣은 그 호스트만 런타임에 요청한다.
-  // (권한이 없으면 서비스 워커의 fetch가 CORS로 막힌다)
-  function originPatternFromUrl(url) {
-    try {
-      const u = new URL(url);
-      if (u.protocol !== "https:") return null;
-      return u.origin + "/*";
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function ensureOriginPermission(url) {
+  // 웹훅 호스트 권한은 optional_host_permissions로 두고, 사용자가 연동을 켤 때
+  // 그 순간에만 요청한다. 설치할 때부터 권한을 달라고 하면 쓰지도 않을 사람에게
+  // 겁주는 안내가 뜬다. (권한이 없으면 서비스 워커의 fetch가 CORS로 막힌다)
+  function ensureOriginPermission() {
     return new Promise((resolve) => {
-      const pattern = originPatternFromUrl(url);
-      if (!pattern) {
-        resolve({ ok: false, error: "https:// 로 시작하는 올바른 Webhook URL을 입력해주세요." });
-        return;
-      }
+      const pattern = SsafyMattermost.WEBHOOK_ORIGIN;
       chrome.permissions.contains({ origins: [pattern] }, (has) => {
         if (has) {
           resolve({ ok: true });
@@ -249,32 +239,34 @@
     });
   }
 
-  // Mattermost의 사용자명·채널명에는 공백이 없다. 붙여넣다 섞인 공백만 걷어낸다.
-  function normalizeChannel(v) {
-    return String(v || "")
-      .trim()
-      .replace(/\s+/g, "");
+  // 받을 곳은 반드시 "@아이디"(개인 메시지)여야 한다. 비워두면 웹훅 채널에
+  // 있는 사람 전원에게 알림이 가기 때문에, 입력창 단계에서 막는다.
+  function readTarget() {
+    const el = document.getElementById("mm-channel");
+    const res = SsafyMattermost.normalizeTarget(el.value);
+    // 다듬은 값을 입력창에 되돌려놓아 실제로 저장될 형태를 보여준다.
+    el.value = res.value;
+    return res;
   }
 
   function testMattermost() {
     const btn = document.getElementById("mm-test");
-    const url = document.getElementById("mm-url").value.trim();
-    const channel = normalizeChannel(document.getElementById("mm-channel").value);
-    if (!url) {
-      setMmStatus("Webhook URL을 먼저 입력해주세요.", "err");
+    const target = readTarget();
+    if (!target.ok) {
+      setMmStatus(target.error, "err");
       return;
     }
+    const channel = target.value;
     btn.disabled = true;
     setMmStatus("보내는 중...");
 
-    ensureOriginPermission(url).then((perm) => {
+    ensureOriginPermission().then((perm) => {
       if (!perm.ok) {
         btn.disabled = false;
         setMmStatus(perm.error, "err");
         return;
       }
       // 권한을 받은 뒤 화면의 최신 값으로 저장하고 전송한다.
-      mm.webhookUrl = url;
       mm.channel = channel;
       chrome.storage.local.set({ mattermost: mm }, () => {
         renderMattermost();
@@ -288,12 +280,10 @@
             setMmStatus("전송 실패: " + (res.error || "알 수 없는 오류"), "err");
             return;
           }
-          const where = channel
-            ? channel.startsWith("@")
-              ? `${channel} 개인 메시지`
-              : `${channel} 채널`
-            : "Webhook 기본 채널";
-          setMmStatus(`✅ 보냈어요! ${where}을(를) 확인해보세요.`, "ok");
+          // 아이디가 맞는지는 여기서 확인할 방법이 없다. 없는 아이디여도
+          // 서버가 오류를 주지 않는 경우가 있어서, "도착했는지 직접 보라"고
+          // 시키는 것이 유일하게 확실한 검증이다.
+          setMmStatus(`✅ ${channel} 로 테스트를 보냈어요. Mattermost에 도착했는지 확인하세요. 안 왔으면 아이디가 틀린 거예요.`, "ok");
         });
       });
     });
@@ -367,7 +357,6 @@
 
     document.getElementById("mm-enabled").addEventListener("change", (e) => {
       const on = e.target.checked;
-      const url = document.getElementById("mm-url").value.trim();
       if (!on) {
         mm.enabled = false;
         saveMattermost();
@@ -375,35 +364,47 @@
         return;
       }
       // 켤 때 Webhook 호스트 권한을 함께 요청한다 (체크박스 클릭이 사용자 제스처).
-      if (!url) {
-        mm.enabled = true;
-        saveMattermost();
-        setMmStatus("Webhook URL을 입력한 뒤 '테스트 메시지 보내기'를 눌러주세요.");
-        return;
-      }
-      ensureOriginPermission(url).then((perm) => {
+      // 받을 곳이 비어 있어도 스위치 자체는 켜준다. 여기서 도로 꺼버리면
+      // 설정 칸이 다시 잠겨(.mm-controls.disabled) 받을 곳을 입력할 방법이
+      // 없어진다. 대신 무엇이 부족한지 알리고, 실제 전송은 background에서
+      // 막는다 - 받을 곳이 없는 동안에는 한 건도 나가지 않는다.
+      const target = readTarget();
+      ensureOriginPermission().then((perm) => {
         if (!perm.ok) {
           mm.enabled = false;
+          e.target.checked = false;
           saveMattermost();
           setMmStatus(perm.error, "err");
           return;
         }
         mm.enabled = true;
-        mm.webhookUrl = url;
-        mm.channel = normalizeChannel(document.getElementById("mm-channel").value);
+        mm.channel = target.value;
         saveMattermost();
-        setMmStatus("✅ 준비됐어요. 테스트 메시지로 확인해보세요.", "ok");
+        if (!target.ok) {
+          setMmStatus(target.error, "err");
+          return;
+        }
+        // 켜자마자 테스트를 보낸다. 아이디를 잘못 적었는지 알 수 있는 방법은
+        // "도착했는지 보는 것"뿐이라, 확인을 나중으로 미루면 정작 필요한 날
+        // 아무것도 안 오는 걸로 알게 된다.
+        testMattermost();
       });
     });
 
-    document.getElementById("mm-url").addEventListener("change", (e) => {
-      mm.webhookUrl = e.target.value.trim();
+    document.getElementById("mm-channel").addEventListener("change", () => {
+      const target = readTarget();
+      // 잘못된 값도 그대로 저장해둔다. 지워버리면 방금 친 내용이 사라져
+      // 무엇을 고쳐야 하는지 알 수 없다. 실제 전송은 background에서 막으므로
+      // 이 상태로 저장돼 있어도 채널로 새어나가지 않는다.
+      mm.channel = target.value;
       saveMattermost();
-    });
-
-    document.getElementById("mm-channel").addEventListener("change", (e) => {
-      mm.channel = normalizeChannel(e.target.value);
-      saveMattermost();
+      if (!target.ok) {
+        setMmStatus(target.error, "err");
+        return;
+      }
+      // 아이디를 고쳤으면 바로 다시 테스트해서 이번엔 맞는지 확인하게 한다.
+      if (mm.enabled) testMattermost();
+      else setMmStatus("");
     });
 
     [

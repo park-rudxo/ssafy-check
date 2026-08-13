@@ -7,7 +7,6 @@
   const AUTO_OPEN_DEFAULTS = { enabled: true, minutesBefore: 5 };
   const MM_DEFAULTS = {
     enabled: false,
-    webhookUrl: "",
     channel: "",
     notifyCheckin: true,
     notifyCheckout: true,
@@ -57,9 +56,13 @@
   }
 
   // ── Mattermost ─────────────────────────────────────────────────────
-  // 사용자명·채널명에 공백은 없다. 붙여넣다 섞인 공백만 걷어낸다.
-  function normalizeChannel(v) {
-    return String(v || "").trim().replace(/\s+/g, "");
+  // 받을 곳은 반드시 "@아이디"(개인 메시지)여야 한다. 비워두면 웹훅 채널에
+  // 있는 사람 전원에게 알림이 가버린다.
+  function readTarget() {
+    const el = $("mm-channel");
+    const res = SsafyMattermost.normalizeTarget(el.value);
+    el.value = res.value; // 실제로 저장될 형태를 보여준다
+    return res;
   }
 
   function setStatus(text, kind) {
@@ -68,21 +71,11 @@
     el.textContent = text;
   }
 
-  // Webhook 호스트는 사람마다 달라 manifest에 미리 넣을 수 없다.
-  // optional_host_permissions로 두고, 입력한 그 호스트만 런타임에 요청한다.
-  function ensureOriginPermission(url) {
+  // 웹훅 호스트 권한은 optional_host_permissions로 두고, 연동을 켜는 이 단계에서만
+  // 요청한다. 설치할 때부터 달라고 하면 쓰지도 않을 사람에게 겁주는 안내가 뜬다.
+  function ensureOriginPermission() {
     return new Promise((resolve) => {
-      let pattern = null;
-      try {
-        const u = new URL(url);
-        if (u.protocol === "https:") pattern = u.origin + "/*";
-      } catch (e) {
-        /* 잘못된 URL */
-      }
-      if (!pattern) {
-        resolve({ ok: false, error: "https:// 로 시작하는 올바른 Webhook URL을 입력해주세요." });
-        return;
-      }
+      const pattern = SsafyMattermost.WEBHOOK_ORIGIN;
       chrome.permissions.contains({ origins: [pattern] }, (has) => {
         if (has) {
           resolve({ ok: true });
@@ -101,57 +94,67 @@
 
   // 화면의 값을 저장하고, 권한까지 받아 실제로 보낼 수 있는 상태로 만든다.
   function applyMattermost() {
-    const url = $("mm-url").value.trim();
-    const channel = normalizeChannel($("mm-channel").value);
-    $("mm-channel").value = channel;
+    const target = readTarget();
+    const channel = target.value;
 
-    if (!url) {
-      // 입력이 없으면 연동을 끈 상태로 저장한다 (건너뛰기와 같은 결과).
-      mm = { ...mm, enabled: false, webhookUrl: "", channel };
+    if (!channel) {
+      // 아무것도 안 적었으면 "나중에 할게요"와 같은 뜻으로 보고 넘어간다.
+      // 이 단계는 선택이므로 빈 칸 때문에 설치를 막지는 않는다.
+      mm = { ...mm, enabled: false, channel: "" };
       return save({ mattermost: mm }).then(() => ({ ok: true, skipped: true }));
     }
 
-    return ensureOriginPermission(url).then((perm) => {
+    // 적기는 했는데 아이디 형식이 아니면 이 단계에 머물러 고치게 한다.
+    if (!target.ok) {
+      mm = { ...mm, enabled: false, channel };
+      return save({ mattermost: mm }).then(() => ({ ok: false, error: target.error }));
+    }
+
+    return ensureOriginPermission().then((perm) => {
       if (!perm.ok) {
-        mm = { ...mm, enabled: false, webhookUrl: url, channel };
+        mm = { ...mm, enabled: false, channel };
         return save({ mattermost: mm }).then(() => ({ ok: false, error: perm.error }));
       }
-      mm = { ...mm, enabled: true, webhookUrl: url, channel };
+      mm = { ...mm, enabled: true, channel };
       return save({ mattermost: mm }).then(() => ({ ok: true }));
     });
   }
 
+  // 저장 → 권한 → 테스트 전송까지 한 번에. 아이디가 맞는지는 "도착했는지
+  // 보는 것" 말고 확인할 방법이 없어서, 설정하자마자 바로 보내본다.
+  // 성공하면 true 로 resolve 한다 (다음 단계로 넘어가도 되는지 판단용).
   function testMattermost() {
     const btn = $("mm-test");
-    if (!$("mm-url").value.trim()) {
-      setStatus("Webhook URL을 먼저 입력해주세요.", "err");
-      return;
+    const target = readTarget();
+    if (!target.ok) {
+      setStatus(target.error, "err");
+      return Promise.resolve(false);
     }
     btn.disabled = true;
     setStatus("보내는 중...", "busy");
 
-    applyMattermost().then((res) => {
+    return applyMattermost().then((res) => {
       if (!res.ok) {
         btn.disabled = false;
         setStatus(res.error, "err");
-        return;
+        return false;
       }
-      chrome.runtime.sendMessage({ type: "mattermostTest" }, (r) => {
-        btn.disabled = false;
-        if (chrome.runtime.lastError || !r) {
-          setStatus("전송 실패. 잠시 후 다시 시도해주세요.", "err");
-          return;
-        }
-        if (!r.ok) {
-          setStatus("전송 실패: " + (r.error || "알 수 없는 오류"), "err");
-          return;
-        }
-        const where = mm.channel
-          ? mm.channel.startsWith("@")
-            ? mm.channel + " 개인 메시지"
-            : mm.channel + " 채널"
-          : "Webhook 기본 채널";
-        setStatus(`✅ 보냈어요! ${where}을(를) 확인해보세요.`, "ok");
+      return new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: "mattermostTest" }, (r) => {
+          btn.disabled = false;
+          if (chrome.runtime.lastError || !r) {
+            setStatus("전송 실패. 잠시 후 다시 시도해주세요.", "err");
+            resolve(false);
+            return;
+          }
+          if (!r.ok) {
+            setStatus("전송 실패: " + (r.error || "알 수 없는 오류"), "err");
+            resolve(false);
+            return;
+          }
+          setStatus(`✅ ${mm.channel} 로 보냈어요. Mattermost에 도착했는지 확인하세요.`, "ok");
+          resolve(true);
+        });
       });
     });
   }
@@ -172,15 +175,11 @@
     ]);
 
     let mmText = "<span class='off'>연동 안 함</span>";
-    if (mm.enabled && mm.webhookUrl) {
-      const where = mm.channel
-        ? mm.channel.startsWith("@")
-          ? `${mm.channel} 개인 메시지`
-          : `${mm.channel} 채널`
-        : "Webhook 기본 채널";
-      mmText = `<span class='on'>켜짐</span> — ${escapeHtml(where)}`;
-    } else if (mm.webhookUrl) {
-      mmText = "<span class='off'>권한 미허용</span> — 팝업에서 다시 시도할 수 있어요";
+    if (mm.enabled) {
+      mmText = `<span class='on'>켜짐</span> — ${escapeHtml(mm.channel)} 개인 메시지`;
+    } else if (mm.channel) {
+      // 아이디는 적었는데 못 켠 경우 (권한 미허용, 형식 오류)
+      mmText = "<span class='off'>안 켜짐</span> — 팝업에서 다시 시도할 수 있어요";
     }
     rows.push(["Mattermost", mmText]);
 
@@ -209,12 +208,16 @@
 
     $("mm-test").addEventListener("click", testMattermost);
     $("mm-next").addEventListener("click", () => {
-      applyMattermost().then((res) => {
-        if (!res.ok) {
-          setStatus(res.error, "err");
-          return; // 권한을 못 받았으면 이 단계에 머물러 다시 시도하게 한다
-        }
-        show(4);
+      // 아무것도 안 적었으면 연동 없이 넘어간다 (이 단계는 선택).
+      if (!$("mm-channel").value.trim()) {
+        applyMattermost().then(() => show(4));
+        return;
+      }
+      // 아이디를 적었으면 저장·권한·테스트 전송까지 하고, 실제로 보내진
+      // 뒤에만 넘어간다. 아이디가 틀렸는지 확인할 방법은 도착 여부뿐이라
+      // 확인을 미루면 정작 필요한 날 아무것도 안 오는 걸로 알게 된다.
+      testMattermost().then((sent) => {
+        if (sent) show(4);
       });
     });
 
@@ -232,7 +235,6 @@
         $("ao-enabled").checked = autoOpen.enabled;
         $("ao-min").value = autoOpen.minutesBefore;
         $("ao-row").classList.toggle("off", !autoOpen.enabled);
-        $("mm-url").value = mm.webhookUrl;
         $("mm-channel").value = mm.channel;
         show(1);
       });

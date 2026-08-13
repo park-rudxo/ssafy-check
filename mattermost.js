@@ -15,14 +15,18 @@
 (function (root) {
   "use strict";
 
-  // Mattermost 사용자명 규칙: 소문자·숫자와 . _ - 만, 3~22자, 첫 글자는 문자.
+  // Mattermost가 계정을 만들 때 요구하는 사용자명 규칙을 그대로 옮긴 것이다.
+  //   "사용자 아이디는 문자로 시작해야 하며 3~22 사이의 숫자, 문자 및
+  //    기호 '.', '-', '_'로 구성된 소문자로 구성되어야 합니다."
+  // 즉 [첫 글자는 a-z] + [나머지 2~21자는 a-z 0-9 . - _] = 전체 3~22자.
+  // 여기 통과하는 값만 실제로 존재할 수 있는 사용자명이다.
   // (한글 표시 이름이 아니라 프로필의 영문 사용자명)
   const USERNAME_RE = /^[a-z][a-z0-9._-]{2,21}$/;
 
   const ERR_EMPTY =
     "받을 곳에 @내아이디를 입력해주세요. 비워두면 웹훅 채널에 있는 모든 사람에게 알림이 갑니다.";
   const ERR_SHAPE =
-    "@내아이디 형태의 영문 사용자명만 쓸 수 있어요 (예: @hong.gildong). 한글 표시 이름이나 채널명은 안 됩니다.";
+    "사용자 아이디는 영문 소문자로 시작하는 3~22자여야 하고, 숫자와 기호 . - _ 만 쓸 수 있어요 (예: @hong.gildong). 한글 표시 이름은 안 됩니다.";
 
   // 입력값을 "@아이디"로 다듬는다.
   //   { ok: true,  value: "@hong" }
@@ -30,10 +34,10 @@
   // 실패해도 value를 돌려주는 이유: 입력창에 그대로 되돌려놓아 사용자가
   // 방금 친 내용을 잃지 않게 하기 위해서다.
   function normalizeTarget(value) {
-    // 붙여넣다 섞인 공백만 걷어낸다. 사용자명·채널명에 공백은 없다.
-    const raw = String(value == null ? "" : value)
-      .trim()
-      .replace(/\s+/g, "");
+    // 앞뒤 공백은 붙여넣기 부스러기라 걷어낸다. 하지만 가운데 공백은 지우지
+    // 않는다 - "hong gil"을 "honggil"로 이어붙이면 규칙은 통과하지만 있지도
+    // 않은 아이디가 되어, 전송이 실패하는 이유를 알 수 없게 된다.
+    const raw = String(value == null ? "" : value).trim();
     const id = raw.replace(/^@+/, "").toLowerCase();
 
     if (!id) return { ok: false, value: "", error: ERR_EMPTY };

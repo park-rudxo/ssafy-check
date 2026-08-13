@@ -35,7 +35,7 @@ test("@아이디를 받아들이고 항상 @가 붙은 형태로 다듬는다", 
     ["hong", "@hong"], // @를 빼먹어도 DM으로 보정
     ["  @hong.gildong  ", "@hong.gildong"],
     ["@Hong_Gil-Dong", "@hong_gil-dong"], // 사용자명은 소문자
-    ["@ho ng", "@hong"], // 붙여넣다 섞인 공백 제거
+    ["\n@hong\t", "@hong"], // 붙여넣기 부스러기(앞뒤 공백)는 걷어낸다
   ];
   for (const [input, expected] of cases) {
     const res = MM.normalizeTarget(input);
@@ -44,10 +44,45 @@ test("@아이디를 받아들이고 항상 @가 붙은 형태로 다듬는다", 
   }
 });
 
-test("사용자명이 될 수 없는 값은 거절한다", () => {
-  // 한글 표시 이름, 너무 짧거나 긴 값, 숫자로 시작하는 값 등
-  for (const v of ["박경도", "@박경도", "ab", "9team", "team!", "a".repeat(23)]) {
-    assert.equal(MM.normalizeTarget(v).ok, false, `${v} 는 거절되어야 한다`);
+// Mattermost의 사용자명 규칙 그대로:
+// "문자로 시작해야 하며 3~22 사이의 숫자, 문자 및 기호 '.', '-', '_'로
+//  구성된 소문자로 구성되어야 합니다."
+// 규칙보다 느슨해지면 존재할 수 없는 아이디를 통과시켜 전송이 조용히
+// 실패하고, 규칙보다 빡빡해지면 멀쩡한 사람이 설정을 못 한다.
+test("사용자명 규칙: 길이 경계 3~22자", () => {
+  assert.equal(MM.isValidTarget("a".repeat(2)), false, "2자는 짧다");
+  assert.equal(MM.isValidTarget("a".repeat(3)), true, "3자는 된다");
+  assert.equal(MM.isValidTarget("a".repeat(22)), true, "22자는 된다");
+  assert.equal(MM.isValidTarget("a".repeat(23)), false, "23자는 길다");
+  // @ 는 길이에 세지 않는다 (입력 편의를 위해 붙였다 떼는 표시일 뿐)
+  assert.equal(MM.isValidTarget("@" + "a".repeat(22)), true);
+});
+
+test("사용자명 규칙: 첫 글자는 문자여야 한다", () => {
+  for (const v of ["9team", "1a2", ".hong", "-hong", "_hong"]) {
+    assert.equal(MM.isValidTarget(v), false, `${v} 는 문자로 시작하지 않는다`);
+  }
+  assert.equal(MM.isValidTarget("h9team"), true);
+});
+
+test("사용자명 규칙: 숫자·문자와 . - _ 만 쓸 수 있다", () => {
+  assert.equal(MM.isValidTarget("hong.gil-dong_9"), true);
+  for (const v of ["team!", "hong+gil", "hong@gil", "hong/gil", "hong#1"]) {
+    assert.equal(MM.isValidTarget(v), false, `${v} 에는 쓸 수 없는 기호가 있다`);
+  }
+});
+
+test("가운데 공백은 이어붙이지 않고 거절한다", () => {
+  // 이어붙이면 "honggil"이라는 없는 아이디가 만들어져, 전송이 왜 실패하는지
+  // 알 수 없게 된다. 규칙에 공백은 없으므로 그대로 거절하고 고치게 한다.
+  const res = MM.normalizeTarget("@hong gil");
+  assert.equal(res.ok, false);
+  assert.equal(res.value, "@hong gil"); // 친 그대로 되돌려준다
+});
+
+test("사용자명 규칙: 한글 표시 이름은 거절한다", () => {
+  for (const v of ["박경도", "@박경도", "hong길동"]) {
+    assert.equal(MM.isValidTarget(v), false, `${v} 는 거절되어야 한다`);
   }
 });
 

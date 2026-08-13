@@ -164,9 +164,13 @@ const MM_DEFAULTS = {
 // 보낸 사람으로 표시할 이름. 웹훅은 만든 사람 계정으로 글을 쓰기 때문에,
 // 그대로 두면 받는 사람 눈에는 웹훅을 만든 사람이 보낸 것처럼 보인다.
 // 사람 이름보다 "출석 알리미"가 무슨 메시지인지 알아보기 쉽다.
-// 서버에서 웹훅의 이름·아이콘 덮어쓰기를 막아두었으면(EnablePostUsernameOverride /
-// EnablePostIconOverride) 이 값은 조용히 무시되고 예전처럼 실명으로 나간다.
-// 실패로 취급할 일은 아니라서 그냥 붙여 보낸다.
+//
+// username/icon_emoji로 글쓴이 자체를 바꾸는 방법은 서버 설정
+// (EnablePostUsernameOverride / EnablePostIconOverride)이 꺼져 있으면
+// 조용히 무시된다 - SSAFY 서버에서 실제로 그랬다. 그래서 게시글 작성자를
+// 바꾸는 대신, 메시지 본문 안에 "출석 알리미" 라벨이 붙은 첨부(attachment)
+// 카드를 넣는다. 이 방식은 서버 설정과 무관하게 항상 적용된다.
+// (게시글 헤더의 "박경도" 표시 자체는 그대로 남는다 - 카드 안쪽 라벨만 바뀐다)
 const MM_BOT_NAME = "출석 알리미";
 const MM_BOT_ICON = ":alarm_clock:";
 
@@ -217,11 +221,21 @@ async function postToMattermost(text, cfg) {
   const target = SsafyMattermost.normalizeTarget(s.channel);
   if (!target.ok) return { ok: false, error: target.error };
 
+  // 내용은 최상위 text가 아니라 attachments 안에 넣는다. username/icon_emoji로
+  // 글쓴이를 바꾸는 방법은 서버가 막아두면 무시되지만, 첨부 카드 안의
+  // author_name은 그 설정과 무관하게 항상 표시된다.
+  // fallback은 카드를 못 그리는 클라이언트(옛 버전 등)를 위한 대체 텍스트다.
   const payload = {
-    text,
     channel: target.value,
     username: MM_BOT_NAME,
     icon_emoji: MM_BOT_ICON,
+    attachments: [
+      {
+        author_name: MM_BOT_NAME,
+        text,
+        fallback: text,
+      },
+    ],
   };
 
   let lastErr = "알 수 없는 오류";

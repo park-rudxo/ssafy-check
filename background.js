@@ -207,7 +207,15 @@ function hhmm(totalMin) {
   return `${String(Math.floor(totalMin / 60)).padStart(2, "0")}:${String(totalMin % 60).padStart(2, "0")}`;
 }
 
-// Incoming Webhook으로 메시지 1건 전송. 일시적인 네트워크 오류를 감안해 1회 재시도.
+// Incoming Webhook으로 메시지 1건 전송.
+//
+// 예전에는 네트워크 오류를 감안해 1회 재시도했는데, Incoming Webhook은
+// 같은 요청을 두 번 보내도 중복으로 걸러주지 않는다. 첫 요청이 서버까지는
+// 도착해 메시지가 실제로 올라갔는데 확장 쪽이 응답을 못 받아 실패로
+// 착각하면, 재시도가 그대로 두 번째 메시지가 되어 "2번씩 온다"는 결과로
+// 이어진다. 그래서 딱 1번만 시도한다. 미체크 경고는 체크할 때까지 몇 분
+// 간격으로 계속 다시 보내므로, 이번 시도가 실패해도 자연히 다음 번에
+// 만회된다.
 async function postToMattermost(text, cfg) {
   const s = cfg || (await getMattermost());
 
@@ -238,24 +246,18 @@ async function postToMattermost(text, cfg) {
     ],
   };
 
-  let lastErr = "알 수 없는 오류";
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await fetch(SsafyMattermost.WEBHOOK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) return { ok: true };
-      // 4xx는 재시도해도 같은 결과라 바로 포기한다 (없는 아이디 등).
-      lastErr = `Mattermost 응답 오류 (${res.status})`;
-      if (res.status >= 400 && res.status < 500) break;
-    } catch (e) {
-      // host_permissions가 없으면 여기서 CORS 오류로 떨어진다.
-      lastErr = String(e && e.message ? e.message : e);
-    }
+  try {
+    const res = await fetch(SsafyMattermost.WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) return { ok: true };
+    return { ok: false, error: `Mattermost 응답 오류 (${res.status})` };
+  } catch (e) {
+    // host_permissions가 없으면 여기서 CORS 오류로 떨어진다.
+    return { ok: false, error: String(e && e.message ? e.message : e) };
   }
-  return { ok: false, error: lastErr };
 }
 
 // ── 오늘의 출석 상태 (content.js가 알려준 클릭 기록) ────────────────────

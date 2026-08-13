@@ -12,7 +12,6 @@
 
   const MM_DEFAULTS = {
     enabled: false,
-    webhookUrl: "",
     channel: "",
     notifyCheckin: true,
     notifyCheckout: true,
@@ -191,7 +190,6 @@
   // ── Mattermost ─────────────────────────────────────────────────────
   function renderMattermost() {
     document.getElementById("mm-enabled").checked = mm.enabled;
-    document.getElementById("mm-url").value = mm.webhookUrl;
     document.getElementById("mm-channel").value = mm.channel;
     document.getElementById("mm-checkin").checked = mm.notifyCheckin;
     document.getElementById("mm-checkout").checked = mm.notifyCheckout;
@@ -200,7 +198,7 @@
 
     // 예전 버전에서 받을 곳을 비운 채 켜둔 설정이 남아 있으면 지금은 아무것도
     // 보내지 않는다. 조용히 안 오는 것보다 이유를 알려주는 편이 낫다.
-    if (mm.enabled && mm.webhookUrl && !SsafyMattermost.isValidTarget(mm.channel)) {
+    if (mm.enabled && !SsafyMattermost.isValidTarget(mm.channel)) {
       setMmStatus("받을 곳에 @내아이디를 입력해야 메시지가 갑니다.", "err");
     }
   }
@@ -219,26 +217,12 @@
     el.textContent = text;
   }
 
-  // Webhook 호스트는 사용자마다 달라서 manifest에 미리 넣을 수 없다.
-  // optional_host_permissions로 두고, URL을 넣은 그 호스트만 런타임에 요청한다.
-  // (권한이 없으면 서비스 워커의 fetch가 CORS로 막힌다)
-  function originPatternFromUrl(url) {
-    try {
-      const u = new URL(url);
-      if (u.protocol !== "https:") return null;
-      return u.origin + "/*";
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function ensureOriginPermission(url) {
+  // 웹훅 호스트 권한은 optional_host_permissions로 두고, 사용자가 연동을 켤 때
+  // 그 순간에만 요청한다. 설치할 때부터 권한을 달라고 하면 쓰지도 않을 사람에게
+  // 겁주는 안내가 뜬다. (권한이 없으면 서비스 워커의 fetch가 CORS로 막힌다)
+  function ensureOriginPermission() {
     return new Promise((resolve) => {
-      const pattern = originPatternFromUrl(url);
-      if (!pattern) {
-        resolve({ ok: false, error: "https:// 로 시작하는 올바른 Webhook URL을 입력해주세요." });
-        return;
-      }
+      const pattern = SsafyMattermost.WEBHOOK_ORIGIN;
       chrome.permissions.contains({ origins: [pattern] }, (has) => {
         if (has) {
           resolve({ ok: true });
@@ -267,12 +251,7 @@
 
   function testMattermost() {
     const btn = document.getElementById("mm-test");
-    const url = document.getElementById("mm-url").value.trim();
     const target = readTarget();
-    if (!url) {
-      setMmStatus("Webhook URL을 먼저 입력해주세요.", "err");
-      return;
-    }
     if (!target.ok) {
       setMmStatus(target.error, "err");
       return;
@@ -281,14 +260,13 @@
     btn.disabled = true;
     setMmStatus("보내는 중...");
 
-    ensureOriginPermission(url).then((perm) => {
+    ensureOriginPermission().then((perm) => {
       if (!perm.ok) {
         btn.disabled = false;
         setMmStatus(perm.error, "err");
         return;
       }
       // 권한을 받은 뒤 화면의 최신 값으로 저장하고 전송한다.
-      mm.webhookUrl = url;
       mm.channel = channel;
       chrome.storage.local.set({ mattermost: mm }, () => {
         renderMattermost();
@@ -376,7 +354,6 @@
 
     document.getElementById("mm-enabled").addEventListener("change", (e) => {
       const on = e.target.checked;
-      const url = document.getElementById("mm-url").value.trim();
       if (!on) {
         mm.enabled = false;
         saveMattermost();
@@ -384,18 +361,12 @@
         return;
       }
       // 켤 때 Webhook 호스트 권한을 함께 요청한다 (체크박스 클릭이 사용자 제스처).
-      if (!url) {
-        mm.enabled = true;
-        saveMattermost();
-        setMmStatus("Webhook URL을 입력한 뒤 '테스트 메시지 보내기'를 눌러주세요.");
-        return;
-      }
       // 받을 곳이 비어 있어도 스위치 자체는 켜준다. 여기서 도로 꺼버리면
       // 설정 칸이 다시 잠겨(.mm-controls.disabled) 받을 곳을 입력할 방법이
       // 없어진다. 대신 무엇이 부족한지 알리고, 실제 전송은 background에서
       // 막는다 - 받을 곳이 없는 동안에는 한 건도 나가지 않는다.
       const target = readTarget();
-      ensureOriginPermission(url).then((perm) => {
+      ensureOriginPermission().then((perm) => {
         if (!perm.ok) {
           mm.enabled = false;
           e.target.checked = false;
@@ -404,7 +375,6 @@
           return;
         }
         mm.enabled = true;
-        mm.webhookUrl = url;
         mm.channel = target.value;
         saveMattermost();
         if (!target.ok) {
@@ -413,11 +383,6 @@
         }
         setMmStatus("✅ 준비됐어요. 테스트 메시지로 확인해보세요.", "ok");
       });
-    });
-
-    document.getElementById("mm-url").addEventListener("change", (e) => {
-      mm.webhookUrl = e.target.value.trim();
-      saveMattermost();
     });
 
     document.getElementById("mm-channel").addEventListener("change", () => {

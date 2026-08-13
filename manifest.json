@@ -10,7 +10,7 @@
   },
   "permissions": ["alarms", "notifications", "storage"],
   "host_permissions": ["https://api.github.com/*"],
-  "optional_host_permissions": ["https://*/*"],
+  "optional_host_permissions": ["https://meeting.ssafy.com/*"],
   "background": {
     "service_worker": "background.js"
   },

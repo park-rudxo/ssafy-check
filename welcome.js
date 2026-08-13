@@ -7,7 +7,6 @@
   const AUTO_OPEN_DEFAULTS = { enabled: true, minutesBefore: 5 };
   const MM_DEFAULTS = {
     enabled: false,
-    webhookUrl: "",
     channel: "",
     notifyCheckin: true,
     notifyCheckout: true,
@@ -72,21 +71,11 @@
     el.textContent = text;
   }
 
-  // Webhook 호스트는 사람마다 달라 manifest에 미리 넣을 수 없다.
-  // optional_host_permissions로 두고, 입력한 그 호스트만 런타임에 요청한다.
-  function ensureOriginPermission(url) {
+  // 웹훅 호스트 권한은 optional_host_permissions로 두고, 연동을 켜는 이 단계에서만
+  // 요청한다. 설치할 때부터 달라고 하면 쓰지도 않을 사람에게 겁주는 안내가 뜬다.
+  function ensureOriginPermission() {
     return new Promise((resolve) => {
-      let pattern = null;
-      try {
-        const u = new URL(url);
-        if (u.protocol === "https:") pattern = u.origin + "/*";
-      } catch (e) {
-        /* 잘못된 URL */
-      }
-      if (!pattern) {
-        resolve({ ok: false, error: "https:// 로 시작하는 올바른 Webhook URL을 입력해주세요." });
-        return;
-      }
+      const pattern = SsafyMattermost.WEBHOOK_ORIGIN;
       chrome.permissions.contains({ origins: [pattern] }, (has) => {
         if (has) {
           resolve({ ok: true });
@@ -105,37 +94,38 @@
 
   // 화면의 값을 저장하고, 권한까지 받아 실제로 보낼 수 있는 상태로 만든다.
   function applyMattermost() {
-    const url = $("mm-url").value.trim();
     const target = readTarget();
     const channel = target.value;
 
-    if (!url) {
-      // 입력이 없으면 연동을 끈 상태로 저장한다 (건너뛰기와 같은 결과).
-      mm = { ...mm, enabled: false, webhookUrl: "", channel };
+    if (!channel) {
+      // 아무것도 안 적었으면 "나중에 할게요"와 같은 뜻으로 보고 넘어간다.
+      // 이 단계는 선택이므로 빈 칸 때문에 설치를 막지는 않는다.
+      mm = { ...mm, enabled: false, channel: "" };
       return save({ mattermost: mm }).then(() => ({ ok: true, skipped: true }));
     }
 
-    // URL만 넣고 받을 곳을 비우면 웹훅 채널 전체에 알림이 가므로, 연동을 켜지
-    // 않고 이 단계에 머물게 한다.
+    // 적기는 했는데 아이디 형식이 아니면 이 단계에 머물러 고치게 한다.
     if (!target.ok) {
-      mm = { ...mm, enabled: false, webhookUrl: url, channel };
+      mm = { ...mm, enabled: false, channel };
       return save({ mattermost: mm }).then(() => ({ ok: false, error: target.error }));
     }
 
-    return ensureOriginPermission(url).then((perm) => {
+    return ensureOriginPermission().then((perm) => {
       if (!perm.ok) {
-        mm = { ...mm, enabled: false, webhookUrl: url, channel };
+        mm = { ...mm, enabled: false, channel };
         return save({ mattermost: mm }).then(() => ({ ok: false, error: perm.error }));
       }
-      mm = { ...mm, enabled: true, webhookUrl: url, channel };
+      mm = { ...mm, enabled: true, channel };
       return save({ mattermost: mm }).then(() => ({ ok: true }));
     });
   }
 
   function testMattermost() {
     const btn = $("mm-test");
-    if (!$("mm-url").value.trim()) {
-      setStatus("Webhook URL을 먼저 입력해주세요.", "err");
+    // 받을 사람이 없으면 보낼 곳도 없다. 건너뛰기로 넘어가지 않도록 여기서 막는다.
+    const target = readTarget();
+    if (!target.ok) {
+      setStatus(target.error, "err");
       return;
     }
     btn.disabled = true;
@@ -178,12 +168,11 @@
     ]);
 
     let mmText = "<span class='off'>연동 안 함</span>";
-    if (mm.enabled && mm.webhookUrl) {
+    if (mm.enabled) {
       mmText = `<span class='on'>켜짐</span> — ${escapeHtml(mm.channel)} 개인 메시지`;
-    } else if (mm.webhookUrl && !SsafyMattermost.isValidTarget(mm.channel)) {
-      mmText = "<span class='off'>받을 곳 미입력</span> — 팝업에서 @내아이디를 넣으면 켜집니다";
-    } else if (mm.webhookUrl) {
-      mmText = "<span class='off'>권한 미허용</span> — 팝업에서 다시 시도할 수 있어요";
+    } else if (mm.channel) {
+      // 아이디는 적었는데 못 켠 경우 (권한 미허용, 형식 오류)
+      mmText = "<span class='off'>안 켜짐</span> — 팝업에서 다시 시도할 수 있어요";
     }
     rows.push(["Mattermost", mmText]);
 
@@ -235,7 +224,6 @@
         $("ao-enabled").checked = autoOpen.enabled;
         $("ao-min").value = autoOpen.minutesBefore;
         $("ao-row").classList.toggle("off", !autoOpen.enabled);
-        $("mm-url").value = mm.webhookUrl;
         $("mm-channel").value = mm.channel;
         show(1);
       });

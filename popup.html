@@ -373,18 +373,12 @@
 
       <div class="mm-controls" id="mm-controls">
         <div class="field">
-          <span class="field-label">Incoming Webhook URL</span>
-          <input type="url" id="mm-url" placeholder="https://.../hooks/xxxxxxxxxx" />
-          <div class="time-hint">Mattermost → 통합 → Incoming Webhook에서 만든 URL</div>
-        </div>
-
-        <div class="field">
           <span class="field-label">받을 곳 (필수)</span>
           <input type="text" id="mm-channel" placeholder="@내아이디" />
           <div class="time-hint">
-            <b>@내아이디</b>(영문 소문자로 시작하는 3~22자, 숫자와 <code>. - _</code> 사용 가능)를
-            넣으면 개인 메시지(DM)로 옵니다. DM은 폰 푸시가 기본으로 와서 이게 제일 확실해요.
-            <b>비워두면 웹훅 채널에 있는 사람 전원에게 알림이 가기 때문에</b> 반드시 입력해야 합니다.
+            SSAFY Mattermost(<code>meeting.ssafy.com</code>)의 <b>@내아이디</b>로 개인 메시지(DM)가 옵니다.
+            프로필의 영문 사용자명(소문자로 시작하는 3~22자, 숫자와 <code>. - _</code> 사용 가능)이고,
+            한글 표시 이름이 아닙니다. <b>이걸 넣어야만 메시지가 나갑니다.</b>
           </div>
         </div>
 

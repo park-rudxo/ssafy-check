@@ -101,6 +101,19 @@ test("거절해도 입력값은 되돌려준다 (입력창에 다시 채우기 �
   assert.equal(res.value, "@박경도");
 });
 
+test("웹훅은 SSAFY Mattermost 하나로 고정되어 있다", () => {
+  // 주소가 바뀌면 아무에게도 알림이 가지 않는데 조용히 실패하므로, 여기에
+  // 박아두고 바뀔 때 눈에 띄게 한다. 권한 요청 호스트도 같은 곳이어야 한다.
+  assert.equal(MM.WEBHOOK_URL, "https://meeting.ssafy.com/hooks/os38ib43ufrkumwckoffdyx7so");
+  assert.equal(MM.WEBHOOK_ORIGIN, "https://meeting.ssafy.com/*");
+  assert.equal(new URL(MM.WEBHOOK_URL).origin + "/*", MM.WEBHOOK_ORIGIN);
+
+  // manifest에 없는 호스트는 권한을 요청할 수 없다. 웹훅 주소만 바꾸고
+  // manifest를 안 고치면 "권한을 허용해야..."에서 영영 막힌다.
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
+  assert.deepEqual(manifest.optional_host_permissions, [MM.WEBHOOK_ORIGIN]);
+});
+
 test("isValidTarget은 normalizeTarget의 판정과 같다", () => {
   assert.equal(MM.isValidTarget("@hong"), true);
   assert.equal(MM.isValidTarget(""), false);

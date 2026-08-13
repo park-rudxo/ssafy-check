@@ -30,7 +30,7 @@ try {
   };
 }
 
-// 받을 곳(@아이디) 검증도 팝업·설치 화면과 같은 규칙을 써야 한다.
+// 고정 웹훅 주소와 받을 곳(@아이디) 검증. 팝업·설치 화면과 같은 규칙을 써야 한다.
 // 이 파일이 없으면 검증을 못 하는데, 그렇다고 검증 없이 보내면 채널 전체에
 // 알림이 갈 수 있으므로 "전부 거절"로 물러난다. (홀리데이와 달리 안전한
 // 기본값이 '보내지 않기'인 쪽이다)
@@ -152,10 +152,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // ── Mattermost 연동 ───────────────────────────────────────────────────
 // 크롬 알림은 자리를 비우거나 크롬을 닫으면 못 보지만, Mattermost로 보내면
 // 폰 앱으로 푸시가 오기 때문에 "18시 넘었는데 퇴실 안 함"을 놓치기 어렵다.
-// Incoming Webhook(토큰/봇 계정 불필요)에 JSON을 POST하는 방식만 쓴다.
+// 고정된 Incoming Webhook(토큰/봇 계정 불필요)에 JSON을 POST하는 방식만 쓴다.
 const MM_DEFAULTS = {
   enabled: false,
-  webhookUrl: "",
   channel: "", // 반드시 "@아이디" (개인 메시지). 비면 아예 보내지 않는다.
   notifyCheckin: true,
   notifyCheckout: true,
@@ -198,15 +197,14 @@ function hhmm(totalMin) {
 // Incoming Webhook으로 메시지 1건 전송. 일시적인 네트워크 오류를 감안해 1회 재시도.
 async function postToMattermost(text, cfg) {
   const s = cfg || (await getMattermost());
-  if (!s.webhookUrl) return { ok: false, error: "Webhook URL이 설정되지 않았어요." };
 
   // 받는 사람은 반드시 "@아이디"여야 한다. 비어 있으면 Webhook의 기본 채널로
   // 가버려서 그 방 사람들 전원에게 알림이 울리므로, 여기서 막는다.
-  // (설정 화면에서도 막지만, 예전 버전에서 비워둔 채 저장된 설정이 남아
-  //  있을 수 있어 실제 전송 직전에 한 번 더 확인한다)
+  // 웹훅이 모두 같은 하나이기 때문에 이걸 놓치면 반 전체가 서로의 알림을
+  // 받게 된다. (설정 화면에서도 막지만, 예전 버전에서 비워둔 채 저장된
+  // 설정이 남아 있을 수 있어 실제 전송 직전에 한 번 더 확인한다)
   // DM은 Mattermost 기본 설정에서 폰 푸시가 오기 때문에 알림용으로도 가장
-  // 확실하다. 단, Webhook을 만들 때 "이 채널로 잠금"을 켜두면 서버가 이
-  // 값을 무시하므로 그 경우엔 잠금을 풀어야 한다.
+  // 확실하다.
   const target = SsafyMattermost.normalizeTarget(s.channel);
   if (!target.ok) return { ok: false, error: target.error };
 
@@ -215,13 +213,13 @@ async function postToMattermost(text, cfg) {
   let lastErr = "알 수 없는 오류";
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch(s.webhookUrl, {
+      const res = await fetch(SsafyMattermost.WEBHOOK_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       if (res.ok) return { ok: true };
-      // 4xx는 재시도해도 같은 결과라 바로 포기한다 (URL 오타 등).
+      // 4xx는 재시도해도 같은 결과라 바로 포기한다 (없는 아이디 등).
       lastErr = `Mattermost 응답 오류 (${res.status})`;
       if (res.status >= 400 && res.status < 500) break;
     } catch (e) {
@@ -284,7 +282,7 @@ async function handleAttendanceRecorded(msg) {
   await chrome.storage.local.set({ attendance: a });
 
   const s = await getMattermost();
-  if (!s.enabled || !s.webhookUrl) return { ok: true };
+  if (!s.enabled) return { ok: true };
   // 받는 사람이 없으면 보내지 않는다. markSentOnce보다 먼저 확인해서,
   // 설정을 고친 뒤 그날 안에 다시 보낼 수 있게 한다.
   if (!SsafyMattermost.isValidTarget(s.channel)) return { ok: true };
@@ -320,7 +318,7 @@ async function handleMattermostWarning(totalMin) {
   if (await isDayOff()) return; // 주말·공휴일·개인 휴무일에는 경고하지 않는다
 
   const s = await getMattermost();
-  if (!s.enabled || !s.webhookUrl || !s.notifyMissing) return;
+  if (!s.enabled || !s.notifyMissing) return;
   if (!SsafyMattermost.isValidTarget(s.channel)) return;
 
   const a = await getAttendance();

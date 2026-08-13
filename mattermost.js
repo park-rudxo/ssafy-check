@@ -1,4 +1,11 @@
-// SSAFY 출석 체크 알리미 - Mattermost "받을 곳" 검증 (공용 모듈)
+// SSAFY 출석 체크 알리미 - Mattermost 연동 설정 (공용 모듈)
+//
+// ── 웹훅은 하나로 고정한다 ────────────────────────────────────────────
+// 예전에는 각자 웹훅을 만들어 URL을 붙여넣게 했지만, 통합(Integrations)
+// 메뉴가 막혀 있는 사람도 있고 단계가 길어 중간에 포기하기 쉬웠다.
+// SSAFY Mattermost의 웹훅 하나로 고정하면 사용자는 자기 아이디만 넣으면
+// 된다. 이 URL은 확장에 들어 있는 값이라 비밀이 아니다 - 설치한 사람은
+// 누구나 꺼내 볼 수 있으므로, 여기에 비밀로 지켜야 할 것을 두면 안 된다.
 //
 // ── 왜 아이디를 필수로 받는가 ─────────────────────────────────────────
 // 받을 곳을 비워두면 웹훅을 만들 때 고른 채널로 메시지가 간다. 반 사람들이
@@ -14,6 +21,11 @@
 
 (function (root) {
   "use strict";
+
+  // 고정 웹훅. 바꿔야 할 일이 생기면 여기 한 줄만 고치면 된다.
+  const WEBHOOK_URL = "https://meeting.ssafy.com/hooks/os38ib43ufrkumwckoffdyx7so";
+  // 이 호스트에만 런타임 권한을 요청한다 (manifest의 optional_host_permissions).
+  const WEBHOOK_ORIGIN = "https://meeting.ssafy.com/*";
 
   // Mattermost가 계정을 만들 때 요구하는 사용자명 규칙을 그대로 옮긴 것이다.
   //   "사용자 아이디는 문자로 시작해야 하며 3~22 사이의 숫자, 문자 및
@@ -50,6 +62,8 @@
   }
 
   root.SsafyMattermost = {
+    WEBHOOK_URL,
+    WEBHOOK_ORIGIN,
     normalizeTarget,
     isValidTarget,
     ERR_EMPTY,

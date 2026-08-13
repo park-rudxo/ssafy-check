@@ -165,14 +165,14 @@ const MM_DEFAULTS = {
 // 그대로 두면 받는 사람 눈에는 웹훅을 만든 사람이 보낸 것처럼 보인다.
 // 사람 이름보다 "출석 알리미"가 무슨 메시지인지 알아보기 쉽다.
 //
-// username/icon_emoji로 글쓴이 자체를 바꾸는 방법은 서버 설정
-// (EnablePostUsernameOverride / EnablePostIconOverride)이 꺼져 있으면
-// 조용히 무시된다 - SSAFY 서버에서 실제로 그랬다. 그래서 게시글 작성자를
-// 바꾸는 대신, 메시지 본문 안에 "출석 알리미" 라벨이 붙은 첨부(attachment)
-// 카드를 넣는다. 이 방식은 서버 설정과 무관하게 항상 적용된다.
+// payload에 username/icon_emoji를 실어 글쓴이 자체를 바꾸는 방법을
+// 먼저 시도했지만, SSAFY 서버에서 실제로 테스트해 확인한 결과 게시글
+// 헤더는 그대로였다 (EnablePostUsernameOverride가 꺼져 있는 서버 설정
+// 때문 - 확장에서 바꿀 수 없다). 그래서 게시글 작성자를 바꾸는 대신,
+// 메시지 본문 안에 "출석 알리미" 라벨이 붙은 첨부(attachment) 카드를
+// 넣는다. 이 방식은 서버 설정과 무관하게 항상 적용된다.
 // (게시글 헤더의 "박경도" 표시 자체는 그대로 남는다 - 카드 안쪽 라벨만 바뀐다)
 const MM_BOT_NAME = "출석 알리미";
-const MM_BOT_ICON = ":alarm_clock:";
 
 // 미체크 경고를 보낼 시각들. 한 번 보내고 끝내면 놓치기 쉬워서, 아직
 // 체크되지 않은 동안 점점 촘촘하게 여러 번 보낸다.
@@ -229,14 +229,11 @@ async function postToMattermost(text, cfg) {
   const target = SsafyMattermost.normalizeTarget(s.channel);
   if (!target.ok) return { ok: false, error: target.error };
 
-  // 내용은 최상위 text가 아니라 attachments 안에 넣는다. username/icon_emoji로
-  // 글쓴이를 바꾸는 방법은 서버가 막아두면 무시되지만, 첨부 카드 안의
-  // author_name은 그 설정과 무관하게 항상 표시된다.
+  // 내용은 최상위 text가 아니라 attachments 안에 넣는다. 첨부 카드 안의
+  // author_name은 서버의 게시자 덮어쓰기 설정과 무관하게 항상 표시된다.
   // fallback은 카드를 못 그리는 클라이언트(옛 버전 등)를 위한 대체 텍스트다.
   const payload = {
     channel: target.value,
-    username: MM_BOT_NAME,
-    icon_emoji: MM_BOT_ICON,
     attachments: [
       {
         author_name: MM_BOT_NAME,

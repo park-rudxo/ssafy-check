@@ -161,6 +161,15 @@ const MM_DEFAULTS = {
   notifyMissing: true,
 };
 
+// 보낸 사람으로 표시할 이름. 웹훅은 만든 사람 계정으로 글을 쓰기 때문에,
+// 그대로 두면 받는 사람 눈에는 웹훅을 만든 사람이 보낸 것처럼 보인다.
+// 사람 이름보다 "출석 알리미"가 무슨 메시지인지 알아보기 쉽다.
+// 서버에서 웹훅의 이름·아이콘 덮어쓰기를 막아두었으면(EnablePostUsernameOverride /
+// EnablePostIconOverride) 이 값은 조용히 무시되고 예전처럼 실명으로 나간다.
+// 실패로 취급할 일은 아니라서 그냥 붙여 보낸다.
+const MM_BOT_NAME = "출석 알리미";
+const MM_BOT_ICON = ":alarm_clock:";
+
 // 미체크 경고를 보낼 시각들. 한 번 보내고 끝내면 놓치기 쉬워서, 아직
 // 체크되지 않은 동안 점점 촘촘하게 여러 번 보낸다.
 const MM_WARN_CHECKIN_MINS = [8 * 60 + 50, 8 * 60 + 55, 8 * 60 + 58];
@@ -208,7 +217,12 @@ async function postToMattermost(text, cfg) {
   const target = SsafyMattermost.normalizeTarget(s.channel);
   if (!target.ok) return { ok: false, error: target.error };
 
-  const payload = { text, channel: target.value };
+  const payload = {
+    text,
+    channel: target.value,
+    username: MM_BOT_NAME,
+    icon_emoji: MM_BOT_ICON,
+  };
 
   let lastErr = "알 수 없는 오류";
   for (let attempt = 0; attempt < 2; attempt++) {

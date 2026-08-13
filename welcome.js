@@ -120,34 +120,41 @@
     });
   }
 
+  // 저장 → 권한 → 테스트 전송까지 한 번에. 아이디가 맞는지는 "도착했는지
+  // 보는 것" 말고 확인할 방법이 없어서, 설정하자마자 바로 보내본다.
+  // 성공하면 true 로 resolve 한다 (다음 단계로 넘어가도 되는지 판단용).
   function testMattermost() {
     const btn = $("mm-test");
-    // 받을 사람이 없으면 보낼 곳도 없다. 건너뛰기로 넘어가지 않도록 여기서 막는다.
     const target = readTarget();
     if (!target.ok) {
       setStatus(target.error, "err");
-      return;
+      return Promise.resolve(false);
     }
     btn.disabled = true;
     setStatus("보내는 중...", "busy");
 
-    applyMattermost().then((res) => {
+    return applyMattermost().then((res) => {
       if (!res.ok) {
         btn.disabled = false;
         setStatus(res.error, "err");
-        return;
+        return false;
       }
-      chrome.runtime.sendMessage({ type: "mattermostTest" }, (r) => {
-        btn.disabled = false;
-        if (chrome.runtime.lastError || !r) {
-          setStatus("전송 실패. 잠시 후 다시 시도해주세요.", "err");
-          return;
-        }
-        if (!r.ok) {
-          setStatus("전송 실패: " + (r.error || "알 수 없는 오류"), "err");
-          return;
-        }
-        setStatus(`✅ 보냈어요! ${mm.channel} 개인 메시지를 확인해보세요.`, "ok");
+      return new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: "mattermostTest" }, (r) => {
+          btn.disabled = false;
+          if (chrome.runtime.lastError || !r) {
+            setStatus("전송 실패. 잠시 후 다시 시도해주세요.", "err");
+            resolve(false);
+            return;
+          }
+          if (!r.ok) {
+            setStatus("전송 실패: " + (r.error || "알 수 없는 오류"), "err");
+            resolve(false);
+            return;
+          }
+          setStatus(`✅ ${mm.channel} 로 보냈어요. Mattermost에 도착했는지 확인하세요.`, "ok");
+          resolve(true);
+        });
       });
     });
   }
@@ -201,12 +208,16 @@
 
     $("mm-test").addEventListener("click", testMattermost);
     $("mm-next").addEventListener("click", () => {
-      applyMattermost().then((res) => {
-        if (!res.ok) {
-          setStatus(res.error, "err");
-          return; // 권한을 못 받았으면 이 단계에 머물러 다시 시도하게 한다
-        }
-        show(4);
+      // 아무것도 안 적었으면 연동 없이 넘어간다 (이 단계는 선택).
+      if (!$("mm-channel").value.trim()) {
+        applyMattermost().then(() => show(4));
+        return;
+      }
+      // 아이디를 적었으면 저장·권한·테스트 전송까지 하고, 실제로 보내진
+      // 뒤에만 넘어간다. 아이디가 틀렸는지 확인할 방법은 도착 여부뿐이라
+      // 확인을 미루면 정작 필요한 날 아무것도 안 오는 걸로 알게 된다.
+      testMattermost().then((sent) => {
+        if (sent) show(4);
       });
     });
 

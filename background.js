@@ -523,7 +523,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   // 팝업/튜토리얼의 "테스트 메시지 보내기" 버튼
   if (msg && msg.type === "mattermostTest") {
-    postToMattermost("✅ SSAFY 출석 체크 알리미 연결 테스트입니다.").then(sendResponse);
+    postToMattermost("✅ SSAFY 출석 체크 알리미 — 이 메시지가 보이면 설정 완료입니다.").then(sendResponse);
     return true;
   }
   // 팝업의 "사용법 다시 보기"

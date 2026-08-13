@@ -280,7 +280,10 @@
             setMmStatus("전송 실패: " + (res.error || "알 수 없는 오류"), "err");
             return;
           }
-          setMmStatus(`✅ 보냈어요! ${channel} 개인 메시지를 확인해보세요.`, "ok");
+          // 아이디가 맞는지는 여기서 확인할 방법이 없다. 없는 아이디여도
+          // 서버가 오류를 주지 않는 경우가 있어서, "도착했는지 직접 보라"고
+          // 시키는 것이 유일하게 확실한 검증이다.
+          setMmStatus(`✅ ${channel} 로 테스트를 보냈어요. Mattermost에 도착했는지 확인하세요. 안 왔으면 아이디가 틀린 거예요.`, "ok");
         });
       });
     });
@@ -381,7 +384,10 @@
           setMmStatus(target.error, "err");
           return;
         }
-        setMmStatus("✅ 준비됐어요. 테스트 메시지로 확인해보세요.", "ok");
+        // 켜자마자 테스트를 보낸다. 아이디를 잘못 적었는지 알 수 있는 방법은
+        // "도착했는지 보는 것"뿐이라, 확인을 나중으로 미루면 정작 필요한 날
+        // 아무것도 안 오는 걸로 알게 된다.
+        testMattermost();
       });
     });
 
@@ -392,7 +398,13 @@
       // 이 상태로 저장돼 있어도 채널로 새어나가지 않는다.
       mm.channel = target.value;
       saveMattermost();
-      setMmStatus(target.ok ? "" : target.error, target.ok ? "" : "err");
+      if (!target.ok) {
+        setMmStatus(target.error, "err");
+        return;
+      }
+      // 아이디를 고쳤으면 바로 다시 테스트해서 이번엔 맞는지 확인하게 한다.
+      if (mm.enabled) testMattermost();
+      else setMmStatus("");
     });
 
     [

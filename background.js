@@ -308,23 +308,32 @@ async function handleAttendanceRecorded(msg) {
   }
   await chrome.storage.local.set({ attendance: a });
 
+  await notifyAttendanceDone(kind, minutes);
+  return { ok: true };
+}
+
+// "입실/퇴실 체크 완료" 메시지 1건. 부르는 곳이 둘(버튼 클릭 감지 / 출석
+// 위젯에서 읽어낸 시각)이지만 같은 열쇠로 중복을 막기 때문에, 두 경로가
+// 모두 발동해도 하루에 한 번만 간다.
+async function notifyAttendanceDone(kind, minutes) {
   const s = await getMattermost();
-  if (!s.enabled) return { ok: true };
+  if (!s.enabled) return;
   // 받는 사람이 없으면 보내지 않는다. markSentOnce보다 먼저 확인해서,
   // 설정을 고친 뒤 그날 안에 다시 보낼 수 있게 한다.
-  if (!SsafyMattermost.isValidTarget(s.channel)) return { ok: true };
-  if (kind === "checkin" && !s.notifyCheckin) return { ok: true };
-  if (kind === "checkout" && !s.notifyCheckout) return { ok: true };
-  // 18시 이전 퇴실 클릭은 아직 정상 퇴실이 아니라 "완료"로 알리지 않는다.
-  if (kind === "checkout" && minutes < CHECK_OUT_MIN) return { ok: true };
-  if (!(await markSentOnce(`click-${kind}`))) return { ok: true };
+  if (!SsafyMattermost.isValidTarget(s.channel)) return;
+  if (kind === "checkin" && !s.notifyCheckin) return;
+  if (kind === "checkout" && !s.notifyCheckout) return;
+  // 18시 이전 퇴실 기록은 아직 정상 퇴실이 아니라 "완료"로 알리지 않는다.
+  if (kind === "checkout" && minutes < CHECK_OUT_MIN) return;
+  // 열쇠의 "click-"은 클릭 감지만 이 알림을 보내던 시절의 흔적이다. 이름을
+  // 바꾸면 이미 저장된 오늘치 기록과 어긋나 그날 알림이 한 번 더 가므로 둔다.
+  if (!(await markSentOnce(`click-${kind}`))) return;
 
   const text =
     kind === "checkin"
       ? `✅ **입실 체크 완료** (${hhmm(minutes)})`
       : `✅ **퇴실 체크 완료** (${hhmm(minutes)})`;
   await postToMattermost(text, s);
-  return { ok: true };
 }
 
 // content.js가 출석 위젯에서 읽어낸 서버 기준 시각을 반영한다.
@@ -337,6 +346,14 @@ async function handleAttendanceObserved(msg) {
   a.pageCheckinMin = ci;
   a.pageCheckoutMin = co;
   await chrome.storage.local.set({ attendance: a });
+
+  // 위젯에 시각이 찍혔다는 건 서버가 출석을 받았다는 뜻이라, 클릭 감지보다
+  // 확실한 근거다. 클릭 감지에만 기대면 폰으로 눌렀거나, 다른 PC에서 눌렀거나,
+  // 버튼 클릭 직후 페이지가 넘어가 보고가 유실된 경우에 "완료" 알림이 아예
+  // 오지 않는다. 아침 입실이 딱 그런 경우다 - 출근길에 폰으로 누르고 나면
+  // 이 브라우저에는 클릭 기록이 없어 입실 메시지만 조용히 빠졌다.
+  if (ci != null) await notifyAttendanceDone("checkin", ci);
+  if (co != null) await notifyAttendanceDone("checkout", co);
   return { ok: true };
 }
 

@@ -57,9 +57,13 @@
   }
 
   // ── Mattermost ─────────────────────────────────────────────────────
-  // 사용자명·채널명에 공백은 없다. 붙여넣다 섞인 공백만 걷어낸다.
-  function normalizeChannel(v) {
-    return String(v || "").trim().replace(/\s+/g, "");
+  // 받을 곳은 반드시 "@아이디"(개인 메시지)여야 한다. 비워두면 웹훅 채널에
+  // 있는 사람 전원에게 알림이 가버린다.
+  function readTarget() {
+    const el = $("mm-channel");
+    const res = SsafyMattermost.normalizeTarget(el.value);
+    el.value = res.value; // 실제로 저장될 형태를 보여준다
+    return res;
   }
 
   function setStatus(text, kind) {
@@ -102,13 +106,20 @@
   // 화면의 값을 저장하고, 권한까지 받아 실제로 보낼 수 있는 상태로 만든다.
   function applyMattermost() {
     const url = $("mm-url").value.trim();
-    const channel = normalizeChannel($("mm-channel").value);
-    $("mm-channel").value = channel;
+    const target = readTarget();
+    const channel = target.value;
 
     if (!url) {
       // 입력이 없으면 연동을 끈 상태로 저장한다 (건너뛰기와 같은 결과).
       mm = { ...mm, enabled: false, webhookUrl: "", channel };
       return save({ mattermost: mm }).then(() => ({ ok: true, skipped: true }));
+    }
+
+    // URL만 넣고 받을 곳을 비우면 웹훅 채널 전체에 알림이 가므로, 연동을 켜지
+    // 않고 이 단계에 머물게 한다.
+    if (!target.ok) {
+      mm = { ...mm, enabled: false, webhookUrl: url, channel };
+      return save({ mattermost: mm }).then(() => ({ ok: false, error: target.error }));
     }
 
     return ensureOriginPermission(url).then((perm) => {
@@ -146,12 +157,7 @@
           setStatus("전송 실패: " + (r.error || "알 수 없는 오류"), "err");
           return;
         }
-        const where = mm.channel
-          ? mm.channel.startsWith("@")
-            ? mm.channel + " 개인 메시지"
-            : mm.channel + " 채널"
-          : "Webhook 기본 채널";
-        setStatus(`✅ 보냈어요! ${where}을(를) 확인해보세요.`, "ok");
+        setStatus(`✅ 보냈어요! ${mm.channel} 개인 메시지를 확인해보세요.`, "ok");
       });
     });
   }
@@ -173,12 +179,9 @@
 
     let mmText = "<span class='off'>연동 안 함</span>";
     if (mm.enabled && mm.webhookUrl) {
-      const where = mm.channel
-        ? mm.channel.startsWith("@")
-          ? `${mm.channel} 개인 메시지`
-          : `${mm.channel} 채널`
-        : "Webhook 기본 채널";
-      mmText = `<span class='on'>켜짐</span> — ${escapeHtml(where)}`;
+      mmText = `<span class='on'>켜짐</span> — ${escapeHtml(mm.channel)} 개인 메시지`;
+    } else if (mm.webhookUrl && !SsafyMattermost.isValidTarget(mm.channel)) {
+      mmText = "<span class='off'>받을 곳 미입력</span> — 팝업에서 @내아이디를 넣으면 켜집니다";
     } else if (mm.webhookUrl) {
       mmText = "<span class='off'>권한 미허용</span> — 팝업에서 다시 시도할 수 있어요";
     }

@@ -30,6 +30,23 @@ try {
   };
 }
 
+// 받을 곳(@아이디) 검증도 팝업·설치 화면과 같은 규칙을 써야 한다.
+// 이 파일이 없으면 검증을 못 하는데, 그렇다고 검증 없이 보내면 채널 전체에
+// 알림이 갈 수 있으므로 "전부 거절"로 물러난다. (홀리데이와 달리 안전한
+// 기본값이 '보내지 않기'인 쪽이다)
+try {
+  importScripts("mattermost.js");
+} catch (e) {
+  self.SsafyMattermost = {
+    normalizeTarget() {
+      return { ok: false, value: "", error: "받을 곳을 확인할 수 없어 전송을 멈췄어요." };
+    },
+    isValidTarget() {
+      return false;
+    },
+  };
+}
+
 const REPO = "park-rudxo/ssafy-check";
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 // /releases/latest 는 항상 최신 릴리스 페이지로 넘어간다. 버전이 올라가도
@@ -139,7 +156,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 const MM_DEFAULTS = {
   enabled: false,
   webhookUrl: "",
-  channel: "", // 비우면 Webhook에 설정된 채널. "@아이디"면 개인 메시지(DM)
+  channel: "", // 반드시 "@아이디" (개인 메시지). 비면 아예 보내지 않는다.
   notifyCheckin: true,
   notifyCheckout: true,
   notifyMissing: true,
@@ -183,12 +200,17 @@ async function postToMattermost(text, cfg) {
   const s = cfg || (await getMattermost());
   if (!s.webhookUrl) return { ok: false, error: "Webhook URL이 설정되지 않았어요." };
 
-  // channel을 넣으면 Webhook의 기본 채널 대신 이쪽으로 간다.
-  // "@아이디"는 개인 메시지(DM)가 되고, DM은 Mattermost 기본 설정에서
-  // 폰 푸시가 오기 때문에 혼자 쓰는 알림용으로는 이게 가장 확실하다.
-  // 단, Webhook을 만들 때 "이 채널로 잠금"을 켜두면 서버가 이 값을 무시한다.
-  const payload = { text };
-  if (s.channel) payload.channel = s.channel;
+  // 받는 사람은 반드시 "@아이디"여야 한다. 비어 있으면 Webhook의 기본 채널로
+  // 가버려서 그 방 사람들 전원에게 알림이 울리므로, 여기서 막는다.
+  // (설정 화면에서도 막지만, 예전 버전에서 비워둔 채 저장된 설정이 남아
+  //  있을 수 있어 실제 전송 직전에 한 번 더 확인한다)
+  // DM은 Mattermost 기본 설정에서 폰 푸시가 오기 때문에 알림용으로도 가장
+  // 확실하다. 단, Webhook을 만들 때 "이 채널로 잠금"을 켜두면 서버가 이
+  // 값을 무시하므로 그 경우엔 잠금을 풀어야 한다.
+  const target = SsafyMattermost.normalizeTarget(s.channel);
+  if (!target.ok) return { ok: false, error: target.error };
+
+  const payload = { text, channel: target.value };
 
   let lastErr = "알 수 없는 오류";
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -263,6 +285,9 @@ async function handleAttendanceRecorded(msg) {
 
   const s = await getMattermost();
   if (!s.enabled || !s.webhookUrl) return { ok: true };
+  // 받는 사람이 없으면 보내지 않는다. markSentOnce보다 먼저 확인해서,
+  // 설정을 고친 뒤 그날 안에 다시 보낼 수 있게 한다.
+  if (!SsafyMattermost.isValidTarget(s.channel)) return { ok: true };
   if (kind === "checkin" && !s.notifyCheckin) return { ok: true };
   if (kind === "checkout" && !s.notifyCheckout) return { ok: true };
   // 18시 이전 퇴실 클릭은 아직 정상 퇴실이 아니라 "완료"로 알리지 않는다.
@@ -296,6 +321,7 @@ async function handleMattermostWarning(totalMin) {
 
   const s = await getMattermost();
   if (!s.enabled || !s.webhookUrl || !s.notifyMissing) return;
+  if (!SsafyMattermost.isValidTarget(s.channel)) return;
 
   const a = await getAttendance();
   if (MM_WARN_CHECKIN_MINS.includes(totalMin)) {

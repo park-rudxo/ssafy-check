@@ -197,6 +197,12 @@
     document.getElementById("mm-checkout").checked = mm.notifyCheckout;
     document.getElementById("mm-missing").checked = mm.notifyMissing;
     document.getElementById("mm-controls").classList.toggle("disabled", !mm.enabled);
+
+    // 예전 버전에서 받을 곳을 비운 채 켜둔 설정이 남아 있으면 지금은 아무것도
+    // 보내지 않는다. 조용히 안 오는 것보다 이유를 알려주는 편이 낫다.
+    if (mm.enabled && mm.webhookUrl && !SsafyMattermost.isValidTarget(mm.channel)) {
+      setMmStatus("받을 곳에 @내아이디를 입력해야 메시지가 갑니다.", "err");
+    }
   }
 
   function saveMattermost() {
@@ -249,21 +255,29 @@
     });
   }
 
-  // Mattermost의 사용자명·채널명에는 공백이 없다. 붙여넣다 섞인 공백만 걷어낸다.
-  function normalizeChannel(v) {
-    return String(v || "")
-      .trim()
-      .replace(/\s+/g, "");
+  // 받을 곳은 반드시 "@아이디"(개인 메시지)여야 한다. 비워두면 웹훅 채널에
+  // 있는 사람 전원에게 알림이 가기 때문에, 입력창 단계에서 막는다.
+  function readTarget() {
+    const el = document.getElementById("mm-channel");
+    const res = SsafyMattermost.normalizeTarget(el.value);
+    // 다듬은 값을 입력창에 되돌려놓아 실제로 저장될 형태를 보여준다.
+    el.value = res.value;
+    return res;
   }
 
   function testMattermost() {
     const btn = document.getElementById("mm-test");
     const url = document.getElementById("mm-url").value.trim();
-    const channel = normalizeChannel(document.getElementById("mm-channel").value);
+    const target = readTarget();
     if (!url) {
       setMmStatus("Webhook URL을 먼저 입력해주세요.", "err");
       return;
     }
+    if (!target.ok) {
+      setMmStatus(target.error, "err");
+      return;
+    }
+    const channel = target.value;
     btn.disabled = true;
     setMmStatus("보내는 중...");
 
@@ -288,12 +302,7 @@
             setMmStatus("전송 실패: " + (res.error || "알 수 없는 오류"), "err");
             return;
           }
-          const where = channel
-            ? channel.startsWith("@")
-              ? `${channel} 개인 메시지`
-              : `${channel} 채널`
-            : "Webhook 기본 채널";
-          setMmStatus(`✅ 보냈어요! ${where}을(를) 확인해보세요.`, "ok");
+          setMmStatus(`✅ 보냈어요! ${channel} 개인 메시지를 확인해보세요.`, "ok");
         });
       });
     });
@@ -381,17 +390,27 @@
         setMmStatus("Webhook URL을 입력한 뒤 '테스트 메시지 보내기'를 눌러주세요.");
         return;
       }
+      // 받을 곳이 비어 있어도 스위치 자체는 켜준다. 여기서 도로 꺼버리면
+      // 설정 칸이 다시 잠겨(.mm-controls.disabled) 받을 곳을 입력할 방법이
+      // 없어진다. 대신 무엇이 부족한지 알리고, 실제 전송은 background에서
+      // 막는다 - 받을 곳이 없는 동안에는 한 건도 나가지 않는다.
+      const target = readTarget();
       ensureOriginPermission(url).then((perm) => {
         if (!perm.ok) {
           mm.enabled = false;
+          e.target.checked = false;
           saveMattermost();
           setMmStatus(perm.error, "err");
           return;
         }
         mm.enabled = true;
         mm.webhookUrl = url;
-        mm.channel = normalizeChannel(document.getElementById("mm-channel").value);
+        mm.channel = target.value;
         saveMattermost();
+        if (!target.ok) {
+          setMmStatus(target.error, "err");
+          return;
+        }
         setMmStatus("✅ 준비됐어요. 테스트 메시지로 확인해보세요.", "ok");
       });
     });
@@ -401,9 +420,14 @@
       saveMattermost();
     });
 
-    document.getElementById("mm-channel").addEventListener("change", (e) => {
-      mm.channel = normalizeChannel(e.target.value);
+    document.getElementById("mm-channel").addEventListener("change", () => {
+      const target = readTarget();
+      // 잘못된 값도 그대로 저장해둔다. 지워버리면 방금 친 내용이 사라져
+      // 무엇을 고쳐야 하는지 알 수 없다. 실제 전송은 background에서 막으므로
+      // 이 상태로 저장돼 있어도 채널로 새어나가지 않는다.
+      mm.channel = target.value;
       saveMattermost();
+      setMmStatus(target.ok ? "" : target.error, target.ok ? "" : "err");
     });
 
     [

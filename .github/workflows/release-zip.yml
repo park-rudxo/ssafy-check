@@ -35,7 +35,8 @@ jobs:
         run: |
           set -euo pipefail
           EXT_FILES="manifest.json background.js content.js content.css holidays.js
-                     build-target.js popup.html popup.js welcome.html welcome.css welcome.js"
+                     mattermost.js build-target.js popup.html popup.js
+                     welcome.html welcome.css welcome.js"
 
           # 두 빌드는 같은 소스에서 나온다. 차이는 아래에서 주는 것뿐이다.
           mkdir -p dist/webstore dist/ssafy-check

@@ -34,7 +34,14 @@
   --accent-soft: #e9f4fb;
   --accent-line: #c5e2f4;
 
-  /* 성공 상태도 같은 색으로. 색이 늘수록 화면이 소란스러워진다. */
+  /* 출석이 "정상"이라는 뜻만 초록이 맡는다. 화면 전반의 하늘색과 역할이
+     겹치지 않도록, 출석 시각·감시 중 표시에만 쓴다. */
+  --good: #12a05f;
+  --good-vivid: #4ad48d;
+  --good-ink: #0a7245;
+  --good-soft: #e7f7ef;
+
+  /* 조작 성공 메시지는 화면 색(하늘색)을 따른다. */
   --ok: #0a6293;
   --ok-soft: #e9f4fb;
   --danger: #d8362f;
@@ -125,18 +132,21 @@ svg {
 .landing > .bento { animation-delay: 0.1s; }
 .landing > .cta { animation-delay: 0.18s; }
 
-/* 어두운 히어로. 색 하나 없이도 대비만으로 시선을 먼저 잡는다. */
-.hero {
+/* 어두운 바탕. 랜딩의 히어로와 설정 화면의 머리가 같은 것을 쓴다.
+   두 화면이 검정과 흰색으로 갈라져 보이지 않게 하려는 것이다. */
+.hero, .panel-head {
   position: relative;
-  padding: 72px 56px 60px;
-  border-radius: var(--r-xl);
+  overflow: hidden;
   background:
     radial-gradient(110% 120% at 50% -25%, #1c2028 0%, rgba(28, 32, 40, 0) 60%),
     radial-gradient(65% 85% at 84% 112%, rgba(59, 163, 220, 0.3) 0%, rgba(59, 163, 220, 0) 62%),
     var(--dark);
   color: var(--on-dark);
+}
+.hero {
+  padding: 72px 56px 60px;
+  border-radius: var(--r-xl);
   text-align: center;
-  overflow: hidden;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 26px 54px -32px rgba(0, 0, 0, 0.7);
 }
 /* 유리 카드 뒤에 하늘빛을 하나 깔아둔다. 유리는 뒤에 비칠 것이 있어야
@@ -155,7 +165,7 @@ svg {
 
 /* 넓은 그라데이션은 그냥 두면 띠(banding)가 보인다. 아주 옅은 노이즈를
    덮어 띠를 지우고, 덤으로 화면이 평평해 보이지 않게 한다. */
-.hero::after {
+.hero::after, .panel-head::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -242,7 +252,7 @@ svg {
   flex: none;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.1);
-  color: var(--accent-vivid);
+  color: var(--good-vivid);
 }
 .pc-ico svg { width: 17px; height: 17px; }
 .pc-name { font-size: 13.5px; font-weight: 600; }
@@ -286,15 +296,15 @@ svg {
   height: 46px;
   flex: none;
   border-radius: 50%;
-  border: 1.5px solid rgba(143, 211, 247, 0.5);
-  background: radial-gradient(circle at 50% 50%, rgba(59, 163, 220, 0.38), rgba(59, 163, 220, 0.06));
-  color: var(--accent-vivid);
+  border: 1.5px solid rgba(74, 212, 141, 0.5);
+  background: radial-gradient(circle at 50% 50%, rgba(18, 160, 95, 0.4), rgba(18, 160, 95, 0.06));
+  color: var(--good-vivid);
   animation: breathe 3.2s ease-in-out infinite;
 }
 .lc-ring svg { width: 19px; height: 19px; }
 @keyframes breathe {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(143, 211, 247, 0.3); }
-  50% { box-shadow: 0 0 0 9px rgba(143, 211, 247, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(74, 212, 141, 0.32); }
+  50% { box-shadow: 0 0 0 9px rgba(74, 212, 141, 0); }
 }
 .lc-foot {
   display: flex;
@@ -315,7 +325,7 @@ svg {
   font-size: 11.5px;
   font-weight: 600;
 }
-.chip.on { color: var(--accent-vivid); }
+.chip.on { color: var(--good-vivid); }
 .chip.on::before {
   content: "";
   width: 6px;
@@ -324,7 +334,7 @@ svg {
   background: currentColor;
 }
 
-/* 상태 배지. 어두운 곳에서는 선명한 초록, 밝은 곳에서는 옅은 초록. */
+/* 상태 배지. 어두운 곳에서는 선명하게, 밝은 곳에서는 옅게. */
 .badge {
   padding: 4px 10px;
   border-radius: var(--r-pill);
@@ -336,6 +346,10 @@ svg {
   white-space: nowrap;
 }
 .badge.soft { background: var(--accent-soft); color: var(--accent-ink); }
+/* 출석 시각(09:00·18:00)은 "이 안에 들어오면 정상"이라는 뜻이라 초록이다. */
+.pill-card .badge { background: var(--good-vivid); color: #05301d; }
+.rule .badge.soft { background: var(--good-soft); color: var(--good-ink); }
+.rule .k { color: var(--good); }
 
 /* ── 벤토 그리드 ───────────────────────────────────────────── */
 .bento {
@@ -593,11 +607,18 @@ svg {
 .panel {
   max-width: 720px;
   margin: 0 auto;
-  padding: 40px 44px 34px;
   border-radius: var(--r-xl);
+  overflow: hidden;
   animation: rise 0.32s cubic-bezier(0.22, 0.8, 0.3, 1);
 }
 .panel[hidden] { display: none; }
+
+.panel-head {
+  padding: 34px 44px 32px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+.panel-head > * { position: relative; z-index: 1; }
+.panel-body { padding: 30px 44px 32px; }
 
 .kicker {
   display: flex;
@@ -607,7 +628,7 @@ svg {
   font-size: 11.5px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: var(--accent);
+  color: var(--accent-vivid);
 }
 .tag {
   padding: 3px 9px;
@@ -615,7 +636,11 @@ svg {
   font-size: 11px;
   letter-spacing: 0;
 }
-.tag.req { background: var(--danger-soft); color: var(--danger); }
+.tag.req {
+  background: rgba(216, 54, 47, 0.22);
+  border: 1px solid rgba(255, 140, 133, 0.35);
+  color: #ff9d96;
+}
 
 .panel h1 {
   margin: 0 0 12px;
@@ -623,6 +648,7 @@ svg {
   font-weight: 700;
   letter-spacing: -0.035em;
 }
+.panel-head .lead { color: var(--on-dark-2); }
 .panel h2 { margin: 36px 0 10px; font-size: 15.5px; font-weight: 700; }
 .panel h3 { margin: 0 0 5px; font-size: 14.5px; font-weight: 700; }
 .lead { margin: 0; color: var(--muted); font-size: 15px; }
@@ -784,6 +810,7 @@ summary:focus-visible {
 }
 
 /* 데스크톱 앱 로그인 경고처럼 "이걸 놓치면 되돌아온다"는 안내 */
+.panel-body > *:first-child { margin-top: 0; }
 .callout {
   display: flex;
   gap: 12px;
@@ -953,11 +980,13 @@ summary:focus-visible {
   .rule, .showcase, .feature { grid-column: auto; }
   .demo { grid-template-columns: 1fr; }
   .cell { padding: 20px; }
-  .panel { padding: 28px 20px 24px; border-radius: var(--r-lg); }
+  .panel { border-radius: var(--r-lg); }
+  .panel-head { padding: 26px 20px 24px; }
+  .panel-body { padding: 24px 20px 26px; }
   .cta { flex-direction: column; align-items: stretch; }
   .steps { font-size: 11.5px; }
   /* 좁은 화면에서는 요약 값이 오른쪽 정렬로 꺾이면 읽기 나쁘다. */
-  .summary .row { flex-direction: column; gap: 2px; }
+  .summary .row { flex-direction: column; align-items: flex-start; gap: 4px; }
   .summary .row span { text-align: left; }
 }
 

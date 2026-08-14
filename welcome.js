@@ -8,6 +8,7 @@
   const MM_DEFAULTS = {
     enabled: false,
     channel: "",
+    webhookUrl: "",
     notifyCheckin: true,
     notifyCheckout: true,
     notifyMissing: true,
@@ -21,6 +22,9 @@
 
   // ── 단계 이동 ──────────────────────────────────────────────────────
   function show(n) {
+    // 1단계(Mattermost 연결)를 마치기 전에는 다음으로 갈 수 없다. 이 판정을
+    // 여기 한 곳에 두면 어느 경로로 오든 같은 규칙이 적용된다.
+    if (n !== 1 && !SsafyMattermost.isConfigured(mm)) n = 1;
     step = n;
     document.querySelectorAll("[data-panel]").forEach((p) => {
       p.hidden = Number(p.dataset.panel) !== n;
@@ -56,13 +60,12 @@
   }
 
   // ── Mattermost ─────────────────────────────────────────────────────
-  // 받을 곳은 반드시 "@아이디"(개인 메시지)여야 한다. 비워두면 웹훅 채널에
-  // 있는 사람 전원에게 알림이 가버린다.
-  function readTarget() {
-    const el = $("mm-channel");
-    const res = SsafyMattermost.normalizeTarget(el.value);
-    el.value = res.value; // 실제로 저장될 형태를 보여준다
-    return res;
+  // 연결이 끝났으면 누구로 붙었는지 보여준다. 아이디를 손으로 넣을 수 없으니
+  // 이게 "내 계정에 제대로 붙었는지" 확인하는 유일한 창이다.
+  function renderMattermost() {
+    const done = SsafyMattermost.isConfigured(mm);
+    $("mm-provision").textContent = done ? "✅ 다시 연결하기" : "🔗 내 계정 연결하기";
+    $("mm-who").textContent = done ? `연결됨: ${mm.channel} — 내 전용 통로로 나에게만 갑니다.` : "";
   }
 
   function setStatus(text, kind) {
@@ -92,69 +95,60 @@
     });
   }
 
-  // 화면의 값을 저장하고, 권한까지 받아 실제로 보낼 수 있는 상태로 만든다.
-  function applyMattermost() {
-    const target = readTarget();
-    const channel = target.value;
+  // 내 계정으로 웹훅을 만들고 아이디까지 서버에서 읽어온다. 여기까지 성공하면
+  // 보낼 곳도 보낼 대상도 확정이므로 연동을 함께 켠다 - 따로 켜게 두면
+  // 연결만 해놓고 안 켠 채로 아무것도 못 받는 사람이 생긴다.
+  function provisionMattermost() {
+    const btn = $("mm-provision");
+    btn.disabled = true;
+    setStatus("Mattermost에 연결하는 중...", "busy");
 
-    if (!channel) {
-      // 아무것도 안 적었으면 "나중에 할게요"와 같은 뜻으로 보고 넘어간다.
-      // 이 단계는 선택이므로 빈 칸 때문에 설치를 막지는 않는다.
-      mm = { ...mm, enabled: false, channel: "" };
-      return save({ mattermost: mm }).then(() => ({ ok: true, skipped: true }));
-    }
-
-    // 적기는 했는데 아이디 형식이 아니면 이 단계에 머물러 고치게 한다.
-    if (!target.ok) {
-      mm = { ...mm, enabled: false, channel };
-      return save({ mattermost: mm }).then(() => ({ ok: false, error: target.error }));
-    }
-
-    return ensureOriginPermission().then((perm) => {
-      if (!perm.ok) {
-        mm = { ...mm, enabled: false, channel };
-        return save({ mattermost: mm }).then(() => ({ ok: false, error: perm.error }));
-      }
-      mm = { ...mm, enabled: true, channel };
-      return save({ mattermost: mm }).then(() => ({ ok: true }));
-    });
+    return ensureOriginPermission()
+      .then((perm) => {
+        if (!perm.ok) throw new Error(perm.error);
+        return SsafyMattermost.provisionPersonalWebhook();
+      })
+      .then((res) => {
+        mm = { ...mm, webhookUrl: res.webhookUrl, channel: res.channel, enabled: true };
+        return save({ mattermost: mm }).then(() => {
+          btn.disabled = false;
+          renderMattermost();
+          setStatus(`✅ ${res.channel} 로 연결했어요. 이제 테스트 메시지를 보내보세요.`, "ok");
+        });
+      })
+      .catch((e) => {
+        btn.disabled = false;
+        setStatus(e && e.message ? e.message : "연결에 실패했어요.", "err");
+      });
   }
 
-  // 저장 → 권한 → 테스트 전송까지 한 번에. 아이디가 맞는지는 "도착했는지
-  // 보는 것" 말고 확인할 방법이 없어서, 설정하자마자 바로 보내본다.
+  // 실제로 한 통 보내본다. 연결이 됐다는 것과 메시지가 도착한다는 것은 다른
+  // 얘기라(폰 알림 설정 등), 도착 여부는 사람이 눈으로 확인해야 한다.
   // 성공하면 true 로 resolve 한다 (다음 단계로 넘어가도 되는지 판단용).
   function testMattermost() {
     const btn = $("mm-test");
-    const target = readTarget();
-    if (!target.ok) {
-      setStatus(target.error, "err");
+    if (!SsafyMattermost.isConfigured(mm)) {
+      setStatus("먼저 [내 계정 연결하기]를 눌러주세요.", "err");
       return Promise.resolve(false);
     }
     btn.disabled = true;
     setStatus("보내는 중...", "busy");
 
-    return applyMattermost().then((res) => {
-      if (!res.ok) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: "mattermostTest" }, (r) => {
         btn.disabled = false;
-        setStatus(res.error, "err");
-        return false;
-      }
-      return new Promise((resolve) => {
-        chrome.runtime.sendMessage({ type: "mattermostTest" }, (r) => {
-          btn.disabled = false;
-          if (chrome.runtime.lastError || !r) {
-            setStatus("전송 실패. 잠시 후 다시 시도해주세요.", "err");
-            resolve(false);
-            return;
-          }
-          if (!r.ok) {
-            setStatus("전송 실패: " + (r.error || "알 수 없는 오류"), "err");
-            resolve(false);
-            return;
-          }
-          setStatus(`✅ ${mm.channel} 로 보냈어요. Mattermost에 도착했는지 확인하세요.`, "ok");
-          resolve(true);
-        });
+        if (chrome.runtime.lastError || !r) {
+          setStatus("전송 실패. 잠시 후 다시 시도해주세요.", "err");
+          resolve(false);
+          return;
+        }
+        if (!r.ok) {
+          setStatus("전송 실패: " + (r.error || "알 수 없는 오류"), "err");
+          resolve(false);
+          return;
+        }
+        setStatus(`✅ ${mm.channel} 로 보냈어요. Mattermost에 도착했는지 확인하세요.`, "ok");
+        resolve(true);
       });
     });
   }
@@ -174,13 +168,9 @@
         : "<span class='off'>꺼짐</span>",
     ]);
 
-    let mmText = "<span class='off'>연동 안 함</span>";
-    if (mm.enabled) {
-      mmText = `<span class='on'>켜짐</span> — ${escapeHtml(mm.channel)} 개인 메시지`;
-    } else if (mm.channel) {
-      // 아이디는 적었는데 못 켠 경우 (권한 미허용, 형식 오류)
-      mmText = "<span class='off'>안 켜짐</span> — 팝업에서 다시 시도할 수 있어요";
-    }
+    const mmText = SsafyMattermost.isConfigured(mm)
+      ? `<span class='on'>연결됨</span> — ${escapeHtml(mm.channel)} 개인 메시지 (내 전용 통로)`
+      : "<span class='off'>연결 안 됨</span> — 팝업에서 다시 시도할 수 있어요";
     rows.push(["Mattermost", mmText]);
 
     $("summary").innerHTML = rows
@@ -197,8 +187,8 @@
     document.querySelectorAll("[data-go]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const to = Number(btn.dataset.go);
-        // 2단계를 떠날 때는 입력한 값을 반영하고 넘어간다.
-        if (step === 2) saveAutoOpen();
+        // 알림 단계(3)를 떠날 때는 입력한 값을 반영하고 넘어간다.
+        if (step === 3) saveAutoOpen();
         show(to);
       });
     });
@@ -206,18 +196,20 @@
     $("ao-enabled").addEventListener("change", saveAutoOpen);
     $("ao-min").addEventListener("change", saveAutoOpen);
 
+    $("mm-provision").addEventListener("click", provisionMattermost);
     $("mm-test").addEventListener("click", testMattermost);
     $("mm-next").addEventListener("click", () => {
-      // 아무것도 안 적었으면 연동 없이 넘어간다 (이 단계는 선택).
-      if (!$("mm-channel").value.trim()) {
-        applyMattermost().then(() => show(4));
+      // 이 단계는 건너뛸 수 없다. 여기를 마치지 않으면 화면 강조까지 꺼진
+      // 채로 설치가 끝나서, 사용자는 "설치했는데 아무 일도 안 일어난다"만
+      // 겪게 된다.
+      if (!SsafyMattermost.isConfigured(mm)) {
+        setStatus("이 단계는 건너뛸 수 없어요. [내 계정 연결하기]를 눌러주세요.", "err");
         return;
       }
-      // 아이디를 적었으면 저장·권한·테스트 전송까지 하고, 실제로 보내진
-      // 뒤에만 넘어간다. 아이디가 틀렸는지 확인할 방법은 도착 여부뿐이라
-      // 확인을 미루면 정작 필요한 날 아무것도 안 오는 걸로 알게 된다.
+      // 실제로 보내진 뒤에만 넘어간다. 확인을 미루면 정작 필요한 날
+      // 아무것도 안 오는 걸로 알게 된다.
       testMattermost().then((sent) => {
-        if (sent) show(4);
+        if (sent) show(2);
       });
     });
 
@@ -235,7 +227,7 @@
         $("ao-enabled").checked = autoOpen.enabled;
         $("ao-min").value = autoOpen.minutesBefore;
         $("ao-row").classList.toggle("off", !autoOpen.enabled);
-        $("mm-channel").value = mm.channel;
+        renderMattermost();
         show(1);
       });
     } catch (e) {

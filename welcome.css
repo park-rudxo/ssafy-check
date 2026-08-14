@@ -298,6 +298,8 @@ input:focus { outline: 2px solid #1976d2; outline-offset: 1px; }
   cursor: pointer;
 }
 .btn:disabled { opacity: 0.5; cursor: default; }
+/* 링크에 .btn 을 쓰면 inline 이라 안쪽 여백이 깨지고 밑줄이 남는다. */
+a.btn { display: inline-block; text-decoration: none; }
 .btn.primary { background: #1976d2; color: #fff; margin-left: auto; }
 .btn.ghost { background: #eceff1; color: #546e7a; }
 .btn.test { margin-top: 16px; background: #4a5f7a; color: #fff; }

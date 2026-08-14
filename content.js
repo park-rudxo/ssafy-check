@@ -28,11 +28,16 @@
   const DAYOFF_DEFAULTS = { offDays: [], workDays: [] };
   let dayOff = { ...DAYOFF_DEFAULTS };
 
+  // Mattermost 연동 설정. 이 확장은 설정을 마치기 전까지 아무것도 강조하지
+  // 않으므로(아래 update 참고), 페이지에서도 이 값을 알아야 한다.
+  let mm = null;
+
   function loadDevSettings(cb) {
     try {
-      chrome.storage.local.get(["ssafyDev", "dayOff"], (data) => {
+      chrome.storage.local.get(["ssafyDev", "dayOff", "mattermost"], (data) => {
         dev = { ...DEV_DEFAULTS, ...(data && data.ssafyDev) };
         dayOff = { ...DAYOFF_DEFAULTS, ...(data && data.dayOff) };
+        mm = (data && data.mattermost) || null;
         if (cb) cb();
       });
     } catch (e) {
@@ -43,9 +48,10 @@
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
-      if (!changes.ssafyDev && !changes.dayOff) return;
+      if (!changes.ssafyDev && !changes.dayOff && !changes.mattermost) return;
       if (changes.ssafyDev) dev = { ...DEV_DEFAULTS, ...changes.ssafyDev.newValue };
       if (changes.dayOff) dayOff = { ...DAYOFF_DEFAULTS, ...changes.dayOff.newValue };
+      if (changes.mattermost) mm = changes.mattermost.newValue || null;
       update();
     });
   } catch (e) {
@@ -122,6 +128,17 @@
       return day >= 1 && day <= 5;
     }
     return !SsafyHolidays.dayInfo(now, dayOff).off;
+  }
+
+  // 설정이 끝났는지. mattermost.js 는 컨텐트 스크립트로 주입하지 않으므로
+  // (페이지에 웹훅 주소를 노출할 이유가 없다) 같은 규칙을 여기서 최소한으로만
+  // 다시 쓴다. 규칙이 바뀌면 mattermost.js 의 isConfigured 와 함께 고쳐야 한다.
+  const USERNAME_RE = /^[a-z][a-z0-9._-]{2,21}$/;
+
+  function isMattermostConfigured() {
+    if (!mm || !mm.enabled) return false;
+    const id = String(mm.channel == null ? "" : mm.channel).trim().replace(/^@+/, "").toLowerCase();
+    return USERNAME_RE.test(id);
   }
 
   // 우리가 그려 넣은 요소(배너·강조 박스·라벨)인지 확인한다.
@@ -446,8 +463,39 @@
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
 
+  // debug.js 가 없어도 (로드 실패 등) 컨텐트 스크립트가 죽지 않게 감싼다.
+  function dlog(...args) {
+    if (typeof SsafyDebug !== "undefined" && SsafyDebug.log) SsafyDebug.log("page", ...args);
+  }
+
+  // 백그라운드로 보고를 보낸다. 실패하면 잠깐 뒤에 몇 번 더 시도한다.
+  //
+  // MV3 서비스 워커는 할 일이 없으면 잠든다. 잠든 워커에 sendMessage를 하면
+  // 크롬이 워커를 깨우는데, 그 사이에 페이지가 넘어가버리면 이 보고가 통째로
+  // 유실된다. 아침 입실이 정확히 그 상황이다 - 그날 첫 알람(08:50)보다 이른
+  // 시각이라 워커가 밤새 잠들어 있고, 입실 버튼을 누르면 화면이 갱신된다.
+  // 반면 퇴실은 17:50·18:00 알람이 막 워커를 깨워둔 뒤라 잘 도착한다.
+  // 웹스토어 빌드에는 15분마다 도는 릴리스 확인 알람마저 없어서(IS_WEBSTORE),
+  // 아침에 워커가 잠들어 있을 확률이 개발용 설치본보다 훨씬 높다.
+  function sendToBackground(payload, tries) {
+    const left = tries == null ? 3 : tries;
+    const retry = (e) => {
+      dlog("보고 실패", { type: payload.type, 남은시도: left - 1, error: String(e && e.message ? e.message : e) });
+      if (left > 1) setTimeout(() => sendToBackground(payload, left - 1), 1000);
+    };
+    try {
+      const p = chrome.runtime.sendMessage(payload);
+      // 서비스 워커가 없을 때 나는 "Receiving end does not exist"를 여기서 받는다.
+      if (p && typeof p.catch === "function") p.catch(retry);
+    } catch (e) {
+      /* 확장 컨텍스트가 무효화된 경우 */
+      retry(e);
+    }
+  }
+
   function recordClick(key) {
     const minutes = nowMinutes();
+    dlog("버튼 클릭 감지", { kind: key === CHECKIN_KEY ? "checkin" : "checkout", minutes });
     try {
       localStorage.setItem(key, JSON.stringify({ date: todayStr(), minutes, at: Date.now() }));
     } catch (e) {
@@ -455,19 +503,14 @@
     }
     // 백그라운드에도 알린다. 서비스 워커는 페이지의 localStorage를 읽을 수
     // 없어서, 이 보고가 있어야 "아직 안 눌렀는지"를 판단해 Mattermost 경고를
-    // 보낼 수 있다.
-    try {
-      const p = chrome.runtime.sendMessage({
-        type: "attendanceRecorded",
-        kind: key === CHECKIN_KEY ? "checkin" : "checkout",
-        minutes,
-        date: todayStr(),
-      });
-      // 서비스 워커가 없을 때 나는 "Receiving end does not exist"를 무시한다.
-      if (p && typeof p.catch === "function") p.catch(() => {});
-    } catch (e) {
-      /* 확장 컨텍스트가 무효화된 경우 무시 */
-    }
+    // 보낼 수 있다. 같은 보고가 두 번 도착해도 백그라운드가 하루 한 번만
+    // 보내도록 막아두어서, 재시도가 메시지 중복으로 이어지지 않는다.
+    sendToBackground({
+      type: "attendanceRecorded",
+      kind: key === CHECKIN_KEY ? "checkin" : "checkout",
+      minutes,
+      date: todayStr(),
+    });
   }
 
   function readRecord(key) {
@@ -499,17 +542,13 @@
     const sig = `${todayStr()}|${checkinMin}|${checkoutMin}`;
     if (sig === lastReportedObserved) return; // 값이 바뀔 때만 보낸다
     lastReportedObserved = sig;
-    try {
-      const p = chrome.runtime.sendMessage({
-        type: "attendanceObserved",
-        date: todayStr(),
-        checkinMin,
-        checkoutMin,
-      });
-      if (p && typeof p.catch === "function") p.catch(() => {});
-    } catch (e) {
-      /* 확장 컨텍스트가 무효화된 경우 무시 */
-    }
+    dlog("위젯에서 읽음", { checkinMin, checkoutMin });
+    sendToBackground({
+      type: "attendanceObserved",
+      date: todayStr(),
+      checkinMin,
+      checkoutMin,
+    });
   }
 
   // 퇴실 클릭 직후에는 위젯에 시각이 아직 안 찍혔을 수 있다(서버 반영 전).
@@ -591,6 +630,22 @@
       removeBox("checkin");
       removeBox("checkout");
       hideBanner();
+      return;
+    }
+
+    // ── Mattermost 설정이 끝나기 전에는 강조를 켜지 않는다 ──────────────
+    // 화면 강조는 이 페이지를 열어놓고 있을 때만 보인다. 자리를 비우거나
+    // 탭을 닫으면 아무 소용이 없고, 정작 놓치는 상황이 바로 그때다. 폰으로
+    // 푸시가 오는 Mattermost 경로까지 갖춰야 이 확장이 제 역할을 하므로,
+    // 설정을 마칠 때까지는 강조 대신 설정하라는 안내만 띄운다.
+    //
+    // mm 이 null 인 동안은 아직 저장소를 읽지 못한 것이므로 아무 판단도 하지
+    // 않는다. 여기서 "설정 안 됨"으로 단정하면 페이지를 열 때마다 안내가
+    // 잠깐씩 번쩍인다.
+    if (mm && !isMattermostConfigured()) {
+      removeBox("checkin");
+      removeBox("checkout");
+      showBanner("⚙️ 설정을 마쳐야 동작합니다. 확장 아이콘을 눌러 Mattermost 알림을 설정하세요.", "warn");
       return;
     }
 

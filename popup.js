@@ -13,6 +13,7 @@
   const MM_DEFAULTS = {
     enabled: false,
     channel: "",
+    webhookUrl: "",
     notifyCheckin: true,
     notifyCheckout: true,
     notifyMissing: true,
@@ -190,17 +191,28 @@
   // ── Mattermost ─────────────────────────────────────────────────────
   function renderMattermost() {
     document.getElementById("mm-enabled").checked = mm.enabled;
-    document.getElementById("mm-channel").value = mm.channel;
     document.getElementById("mm-checkin").checked = mm.notifyCheckin;
     document.getElementById("mm-checkout").checked = mm.notifyCheckout;
     document.getElementById("mm-missing").checked = mm.notifyMissing;
     document.getElementById("mm-controls").classList.toggle("disabled", !mm.enabled);
 
-    // 예전 버전에서 받을 곳을 비운 채 켜둔 설정이 남아 있으면 지금은 아무것도
-    // 보내지 않는다. 조용히 안 오는 것보다 이유를 알려주는 편이 낫다.
-    if (mm.enabled && !SsafyMattermost.isValidTarget(mm.channel)) {
-      setMmStatus("받을 곳에 @내아이디를 입력해야 메시지가 갑니다.", "err");
+    // 연결이 끝났으면 누구로 연결됐는지 보여준다. 아이디를 손으로 넣을 수
+    // 없으므로, 이게 "제대로 내 계정에 붙었는지" 확인하는 유일한 창이다.
+    const done = SsafyMattermost.isConfigured(mm);
+    document.getElementById("mm-provision").textContent = done
+      ? "✅ 다시 연결하기"
+      : "🔗 Mattermost 로그인하여 시작하기";
+    document.getElementById("mm-who").textContent = done
+      ? `연결됨: ${mm.channel} — 내 전용 통로로 나에게만 갑니다.`
+      : "";
+
+    // 예전 버전에서 설정이 덜 된 채로 켜둔 값이 남아 있을 수 있다. 조용히
+    // 안 오는 것보다 이유를 알려주는 편이 낫다.
+    if (mm.enabled && !done) {
+      setMmStatus("연결이 끝나지 않았어요. 위 버튼을 눌러주세요.", "err");
     }
+
+    renderSetupGate();
   }
 
   function saveMattermost() {
@@ -239,24 +251,44 @@
     });
   }
 
-  // 받을 곳은 반드시 "@아이디"(개인 메시지)여야 한다. 비워두면 웹훅 채널에
-  // 있는 사람 전원에게 알림이 가기 때문에, 입력창 단계에서 막는다.
-  function readTarget() {
-    const el = document.getElementById("mm-channel");
-    const res = SsafyMattermost.normalizeTarget(el.value);
-    // 다듬은 값을 입력창에 되돌려놓아 실제로 저장될 형태를 보여준다.
-    el.value = res.value;
-    return res;
+  // 내 계정으로 웹훅을 만들고 아이디까지 채워 넣는다. 실패하면 오류만 알리고
+  // 기존 설정은 건드리지 않는다 - 이미 연결돼 있던 사람이 재시도했다가
+  // 오히려 연결을 잃으면 안 된다.
+  function provisionMattermost() {
+    const btn = document.getElementById("mm-provision");
+    btn.disabled = true;
+    setMmStatus("Mattermost에서 설정을 만드는 중...");
+
+    ensureOriginPermission().then((perm) => {
+      if (!perm.ok) {
+        btn.disabled = false;
+        setMmStatus(perm.error, "err");
+        return;
+      }
+      SsafyMattermost.provisionPersonalWebhook()
+        .then((res) => {
+          mm.webhookUrl = res.webhookUrl;
+          mm.channel = res.channel;
+          // 여기까지 왔으면 보낼 곳도 보낼 대상도 확정이다. 따로 켜게 두면
+          // 연결만 해놓고 안 켠 상태로 남아 아무것도 안 오는 사람이 생긴다.
+          mm.enabled = true;
+          saveMattermost();
+          btn.disabled = false;
+          setMmStatus(`✅ ${res.channel} 로 연결했어요. 테스트 메시지를 보내 확인해보세요.`, "ok");
+        })
+        .catch((e) => {
+          btn.disabled = false;
+          setMmStatus(e && e.message ? e.message : "자동 설정에 실패했어요.", e && e.blocked ? "" : "err");
+        });
+    });
   }
 
   function testMattermost() {
     const btn = document.getElementById("mm-test");
-    const target = readTarget();
-    if (!target.ok) {
-      setMmStatus(target.error, "err");
+    if (!SsafyMattermost.isConfigured(mm)) {
+      setMmStatus("먼저 [Mattermost 로그인하여 시작하기]를 눌러 연결해주세요.", "err");
       return;
     }
-    const channel = target.value;
     btn.disabled = true;
     setMmStatus("보내는 중...");
 
@@ -266,27 +298,73 @@
         setMmStatus(perm.error, "err");
         return;
       }
-      // 권한을 받은 뒤 화면의 최신 값으로 저장하고 전송한다.
-      mm.channel = channel;
-      chrome.storage.local.set({ mattermost: mm }, () => {
-        renderMattermost();
-        chrome.runtime.sendMessage({ type: "mattermostTest" }, (res) => {
-          btn.disabled = false;
-          if (chrome.runtime.lastError || !res) {
-            setMmStatus("전송 실패. 잠시 후 다시 시도해주세요.", "err");
-            return;
-          }
-          if (!res.ok) {
-            setMmStatus("전송 실패: " + (res.error || "알 수 없는 오류"), "err");
-            return;
-          }
-          // 아이디가 맞는지는 여기서 확인할 방법이 없다. 없는 아이디여도
-          // 서버가 오류를 주지 않는 경우가 있어서, "도착했는지 직접 보라"고
-          // 시키는 것이 유일하게 확실한 검증이다.
-          setMmStatus(`✅ ${channel} 로 테스트를 보냈어요. Mattermost에 도착했는지 확인하세요. 안 왔으면 아이디가 틀린 거예요.`, "ok");
-        });
+      chrome.runtime.sendMessage({ type: "mattermostTest" }, (res) => {
+        btn.disabled = false;
+        if (chrome.runtime.lastError || !res) {
+          setMmStatus("전송 실패. 잠시 후 다시 시도해주세요.", "err");
+          return;
+        }
+        if (!res.ok) {
+          setMmStatus("전송 실패: " + (res.error || "알 수 없는 오류"), "err");
+          return;
+        }
+        setMmStatus(`✅ ${mm.channel} 로 테스트를 보냈어요. Mattermost에 도착했는지 확인하세요.`, "ok");
       });
     });
+  }
+
+  // ── 설정 필수 게이트 ───────────────────────────────────────────────
+  // 설정을 마치기 전에는 화면 강조도 켜지지 않으므로(content.js), 팝업에서도
+  // 그 사실을 분명히 알리고 곧장 설정으로 데려간다.
+  function renderSetupGate() {
+    const done = SsafyMattermost.isConfigured(mm);
+    document.getElementById("setup-gate").hidden = done;
+    // 설정이 안 됐으면 Mattermost 섹션을 펼쳐둔다. 접혀 있으면 "설정하라"는
+    // 말만 보이고 설정할 곳은 안 보인다.
+    if (!done) openMattermostSection();
+  }
+
+  function openMattermostSection() {
+    document.getElementById("mm-body").classList.add("open");
+    document.getElementById("mm-header").classList.add("open");
+  }
+
+  function openMattermostHome() {
+    try {
+      chrome.tabs.create({ url: SsafyMattermost.HOME_URL });
+    } catch (e) {
+      /* 탭을 열 수 없는 상황이면 무시 */
+    }
+  }
+
+  // ── 진단 로그 ──────────────────────────────────────────────────────
+  // 이 확장의 실패는 거의 다 "아무 일도 안 일어남"으로 보인다. 어디서 멈췄는지
+  // 사용자가 통째로 복사해 보낼 수 있어야 원인을 좁힐 수 있다.
+  function renderDebugLog() {
+    SsafyDebug.read().then((lines) => {
+      const el = document.getElementById("dbg-text");
+      el.value = lines.length ? lines.join("\n") : "아직 기록이 없습니다.";
+      // 최근 것이 아래에 쌓이므로 열자마자 끝을 보여준다.
+      el.scrollTop = el.scrollHeight;
+    });
+  }
+
+  function setDebugStatus(text) {
+    document.getElementById("dbg-status").textContent = text;
+  }
+
+  function copyDebugLog() {
+    const el = document.getElementById("dbg-text");
+    navigator.clipboard.writeText(el.value).then(
+      () => setDebugStatus("복사했어요. 그대로 붙여넣어 보내주세요."),
+      () => {
+        // 클립보드 권한이 막힌 환경에서는 직접 고르게 해준다.
+        el.removeAttribute("readonly");
+        el.select();
+        el.setAttribute("readonly", "");
+        setDebugStatus("복사가 막혀 있어요. Ctrl+C 를 눌러주세요.");
+      }
+    );
   }
 
   // ── 이벤트 바인딩 ──────────────────────────────────────────────────
@@ -364,11 +442,8 @@
         return;
       }
       // 켤 때 Webhook 호스트 권한을 함께 요청한다 (체크박스 클릭이 사용자 제스처).
-      // 받을 곳이 비어 있어도 스위치 자체는 켜준다. 여기서 도로 꺼버리면
-      // 설정 칸이 다시 잠겨(.mm-controls.disabled) 받을 곳을 입력할 방법이
-      // 없어진다. 대신 무엇이 부족한지 알리고, 실제 전송은 background에서
-      // 막는다 - 받을 곳이 없는 동안에는 한 건도 나가지 않는다.
-      const target = readTarget();
+      // 스위치 자체는 일단 켜준다. 여기서 도로 꺼버리면 설정 칸이 다시
+      // 잠겨(.mm-controls.disabled) 연결 버튼을 누를 방법이 없어진다.
       ensureOriginPermission().then((perm) => {
         if (!perm.ok) {
           mm.enabled = false;
@@ -378,33 +453,13 @@
           return;
         }
         mm.enabled = true;
-        mm.channel = target.value;
         saveMattermost();
-        if (!target.ok) {
-          setMmStatus(target.error, "err");
-          return;
-        }
-        // 켜자마자 테스트를 보낸다. 아이디를 잘못 적었는지 알 수 있는 방법은
-        // "도착했는지 보는 것"뿐이라, 확인을 나중으로 미루면 정작 필요한 날
+        // 아직 연결 전이면 연결부터 시킨다. 이미 연결돼 있으면 바로 테스트해서
+        // 실제로 도착하는지 확인하게 한다 - 확인을 미루면 정작 필요한 날
         // 아무것도 안 오는 걸로 알게 된다.
-        testMattermost();
+        if (SsafyMattermost.isConfigured(mm)) testMattermost();
+        else provisionMattermost();
       });
-    });
-
-    document.getElementById("mm-channel").addEventListener("change", () => {
-      const target = readTarget();
-      // 잘못된 값도 그대로 저장해둔다. 지워버리면 방금 친 내용이 사라져
-      // 무엇을 고쳐야 하는지 알 수 없다. 실제 전송은 background에서 막으므로
-      // 이 상태로 저장돼 있어도 채널로 새어나가지 않는다.
-      mm.channel = target.value;
-      saveMattermost();
-      if (!target.ok) {
-        setMmStatus(target.error, "err");
-        return;
-      }
-      // 아이디를 고쳤으면 바로 다시 테스트해서 이번엔 맞는지 확인하게 한다.
-      if (mm.enabled) testMattermost();
-      else setMmStatus("");
     });
 
     [
@@ -418,6 +473,26 @@
       });
     });
 
+    document.getElementById("setup-gate-go").addEventListener("click", openMattermostSection);
+    document.getElementById("mm-open").addEventListener("click", openMattermostHome);
+
+    // 진단 로그
+    const dbgHeader = document.getElementById("dbg-header");
+    const dbgBody = document.getElementById("dbg-body");
+    dbgHeader.addEventListener("click", () => {
+      const open = dbgBody.classList.toggle("open");
+      dbgHeader.classList.toggle("open", open);
+      if (open) renderDebugLog();
+    });
+    document.getElementById("dbg-copy").addEventListener("click", copyDebugLog);
+    document.getElementById("dbg-clear").addEventListener("click", () => {
+      SsafyDebug.clear().then(() => {
+        renderDebugLog();
+        setDebugStatus("지웠어요. 이제 다시 재현해보세요.");
+      });
+    });
+
+    document.getElementById("mm-provision").addEventListener("click", provisionMattermost);
     document.getElementById("mm-test").addEventListener("click", testMattermost);
 
     document.getElementById("dev-enabled").addEventListener("change", (e) => {

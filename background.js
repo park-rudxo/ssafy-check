@@ -16,6 +16,13 @@ try {
 }
 const IS_WEBSTORE = self.BUILD_TARGET === "webstore";
 
+// 진단 로그. 없어도 기능은 다 돌아가야 하므로 조용한 no-op 으로 물러난다.
+try {
+  importScripts("debug.js");
+} catch (e) {
+  self.SsafyDebug = { log() {}, read: () => Promise.resolve([]), clear: () => Promise.resolve() };
+}
+
 // 공휴일 판정은 content.js/popup.js와 같은 규칙을 써야 하므로 공용 모듈을 불러온다.
 // 파일이 없으면 importScripts가 서비스워커를 통째로 죽이므로, 그 경우엔
 // 예전 동작(주말만 제외)으로 물러나 알림 기능 자체는 살려 둔다.
@@ -43,6 +50,9 @@ try {
     },
     isValidTarget() {
       return false;
+    },
+    pickWebhookUrl() {
+      return "";
     },
   };
 }
@@ -152,18 +162,22 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // ── Mattermost 연동 ───────────────────────────────────────────────────
 // 크롬 알림은 자리를 비우거나 크롬을 닫으면 못 보지만, Mattermost로 보내면
 // 폰 앱으로 푸시가 오기 때문에 "18시 넘었는데 퇴실 안 함"을 놓치기 어렵다.
-// 고정된 Incoming Webhook(토큰/봇 계정 불필요)에 JSON을 POST하는 방식만 쓴다.
+// 사용자 계정으로 발급한 Incoming Webhook(토큰/봇 계정 불필요)에 JSON을
+// POST 하는 방식만 쓴다. 웹훅이 없으면 아무것도 보내지 않는다.
 const MM_DEFAULTS = {
   enabled: false,
   channel: "", // 반드시 "@아이디" (개인 메시지). 비면 아예 보내지 않는다.
+  // 확장이 사용자 계정으로 발급한 웹훅. 이게 없으면 아무것도 보내지 않는다.
+  // 글쓴이가 본인이라, 남의 계정으로 알림이 새어 나갈 구조 자체가 없다.
+  webhookUrl: "",
   notifyCheckin: true,
   notifyCheckout: true,
   notifyMissing: true,
 };
 
-// 보낸 사람으로 표시할 이름. 웹훅은 만든 사람 계정으로 글을 쓰기 때문에,
-// 그대로 두면 받는 사람 눈에는 웹훅을 만든 사람이 보낸 것처럼 보인다.
-// 사람 이름보다 "출석 알리미"가 무슨 메시지인지 알아보기 쉽다.
+// 메시지 카드에 붙일 라벨. 웹훅은 만든 사람(=본인) 계정으로 글을 쓰기 때문에
+// 게시글 헤더에는 자기 이름이 뜨는데, 무슨 메시지인지는 "출석 알리미" 쪽이
+// 알아보기 쉽다.
 //
 // payload에 username/icon_emoji를 실어 글쓴이 자체를 바꾸는 방법을
 // 먼저 시도했지만, SSAFY 서버에서 실제로 테스트해 확인한 결과 게시글
@@ -171,7 +185,7 @@ const MM_DEFAULTS = {
 // 때문 - 확장에서 바꿀 수 없다). 그래서 게시글 작성자를 바꾸는 대신,
 // 메시지 본문 안에 "출석 알리미" 라벨이 붙은 첨부(attachment) 카드를
 // 넣는다. 이 방식은 서버 설정과 무관하게 항상 적용된다.
-// (게시글 헤더의 "박경도" 표시 자체는 그대로 남는다 - 카드 안쪽 라벨만 바뀐다)
+// (게시글 헤더의 계정 이름 표시 자체는 그대로 남는다 - 카드 안쪽 라벨만 바뀐다)
 const MM_BOT_NAME = "출석 알리미";
 
 // 미체크 경고를 보낼 시각들. 한 번 보내고 끝내면 놓치기 쉬워서, 아직
@@ -221,13 +235,15 @@ async function postToMattermost(text, cfg) {
 
   // 받는 사람은 반드시 "@아이디"여야 한다. 비어 있으면 Webhook의 기본 채널로
   // 가버려서 그 방 사람들 전원에게 알림이 울리므로, 여기서 막는다.
-  // 웹훅이 모두 같은 하나이기 때문에 이걸 놓치면 반 전체가 서로의 알림을
-  // 받게 된다. (설정 화면에서도 막지만, 예전 버전에서 비워둔 채 저장된
-  // 설정이 남아 있을 수 있어 실제 전송 직전에 한 번 더 확인한다)
+  // 비워두면 웹훅을 걸어둔 채널로 가버린다. (설정 화면에서도 막지만, 예전
+  // 버전에서 비워둔 채 저장된 설정이 남아 있을 수 있어 전송 직전에 다시 본다)
   // DM은 Mattermost 기본 설정에서 폰 푸시가 오기 때문에 알림용으로도 가장
   // 확실하다.
   const target = SsafyMattermost.normalizeTarget(s.channel);
-  if (!target.ok) return { ok: false, error: target.error };
+  if (!target.ok) {
+    SsafyDebug.log("mm", "받을 곳이 올바르지 않아 보내지 않음", { channel: s.channel, error: target.error });
+    return { ok: false, error: target.error };
+  }
 
   // 내용은 최상위 text가 아니라 attachments 안에 넣는다. 첨부 카드 안의
   // author_name은 서버의 게시자 덮어쓰기 설정과 무관하게 항상 표시된다.
@@ -243,17 +259,35 @@ async function postToMattermost(text, cfg) {
     ],
   };
 
+  // 내 웹훅이 없으면 보낼 곳이 없다. 예전에는 여기서 공용 웹훅으로 물러났는데,
+  // 그러면 자동 설정이 안 된 사람의 알림이 공용 웹훅 주인에게 몰린다.
+  const url = SsafyMattermost.pickWebhookUrl(s);
+  if (!url) {
+    SsafyDebug.log("mm", "내 웹훅이 없어 보내지 않음");
+    return { ok: false, error: "아직 설정이 끝나지 않았어요. 확장 아이콘을 눌러 설정을 마쳐주세요." };
+  }
+  SsafyDebug.log("mm", "전송 시도", { to: target.value, text: text.slice(0, 60) });
+
   try {
-    const res = await fetch(SsafyMattermost.WEBHOOK_URL, {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (res.ok) return { ok: true };
-    return { ok: false, error: `Mattermost 응답 오류 (${res.status})` };
+    if (res.ok) {
+      SsafyDebug.log("mm", "전송 성공", { to: target.value });
+      return { ok: true };
+    }
+    // 본문에 실패 이유가 들어 있다(없는 아이디, 권한 없음, 요청 과다 등).
+    // 이걸 버리면 사용자에게는 "안 왔다"만 남아 원인을 좁힐 수 없다.
+    const body = await res.text().catch(() => "");
+    SsafyDebug.log("mm", "전송 실패", { status: res.status, body: body.slice(0, 300) });
+    return { ok: false, error: `Mattermost 응답 오류 (${res.status}) ${body.slice(0, 200)}` };
   } catch (e) {
     // host_permissions가 없으면 여기서 CORS 오류로 떨어진다.
-    return { ok: false, error: String(e && e.message ? e.message : e) };
+    const msg = String(e && e.message ? e.message : e);
+    SsafyDebug.log("mm", "전송 예외", { error: msg });
+    return { ok: false, error: msg };
   }
 }
 
@@ -298,6 +332,8 @@ async function handleAttendanceRecorded(msg) {
   const minutes = Number(msg.minutes);
   if (!Number.isFinite(minutes)) return { ok: false };
 
+  SsafyDebug.log("보고", "버튼 클릭 도착", { kind, minutes: hhmm(minutes) });
+
   const a = await getAttendance();
   a.date = todayStr();
   if (kind === "checkin") {
@@ -308,23 +344,36 @@ async function handleAttendanceRecorded(msg) {
   }
   await chrome.storage.local.set({ attendance: a });
 
+  await notifyAttendanceDone(kind, minutes);
+  return { ok: true };
+}
+
+// "입실/퇴실 체크 완료" 메시지 1건. 부르는 곳이 둘(버튼 클릭 감지 / 출석
+// 위젯에서 읽어낸 시각)이지만 같은 열쇠로 중복을 막기 때문에, 두 경로가
+// 모두 발동해도 하루에 한 번만 간다.
+async function notifyAttendanceDone(kind, minutes) {
+  // 여기서 걸러진 이유가 곧 "왜 메시지가 안 왔는지"의 답이라, 걸러질 때마다
+  // 그 이유를 남긴다. 조건 하나하나가 조용한 실패의 후보다.
+  const skip = (why) => SsafyDebug.log("done", `${kind} 알림 건너뜀`, { why, minutes });
+
   const s = await getMattermost();
-  if (!s.enabled) return { ok: true };
+  if (!s.enabled) return skip("Mattermost 연동이 꺼져 있음");
   // 받는 사람이 없으면 보내지 않는다. markSentOnce보다 먼저 확인해서,
   // 설정을 고친 뒤 그날 안에 다시 보낼 수 있게 한다.
-  if (!SsafyMattermost.isValidTarget(s.channel)) return { ok: true };
-  if (kind === "checkin" && !s.notifyCheckin) return { ok: true };
-  if (kind === "checkout" && !s.notifyCheckout) return { ok: true };
-  // 18시 이전 퇴실 클릭은 아직 정상 퇴실이 아니라 "완료"로 알리지 않는다.
-  if (kind === "checkout" && minutes < CHECK_OUT_MIN) return { ok: true };
-  if (!(await markSentOnce(`click-${kind}`))) return { ok: true };
+  if (!SsafyMattermost.isValidTarget(s.channel)) return skip(`받을 곳이 올바르지 않음 (${s.channel})`);
+  if (kind === "checkin" && !s.notifyCheckin) return skip("입실 알림이 꺼져 있음");
+  if (kind === "checkout" && !s.notifyCheckout) return skip("퇴실 알림이 꺼져 있음");
+  // 18시 이전 퇴실 기록은 아직 정상 퇴실이 아니라 "완료"로 알리지 않는다.
+  if (kind === "checkout" && minutes < CHECK_OUT_MIN) return skip("18시 이전 퇴실이라 완료로 보지 않음");
+  // 열쇠의 "click-"은 클릭 감지만 이 알림을 보내던 시절의 흔적이다. 이름을
+  // 바꾸면 이미 저장된 오늘치 기록과 어긋나 그날 알림이 한 번 더 가므로 둔다.
+  if (!(await markSentOnce(`click-${kind}`))) return skip("오늘 이미 보냄");
 
   const text =
     kind === "checkin"
       ? `✅ **입실 체크 완료** (${hhmm(minutes)})`
       : `✅ **퇴실 체크 완료** (${hhmm(minutes)})`;
   await postToMattermost(text, s);
-  return { ok: true };
 }
 
 // content.js가 출석 위젯에서 읽어낸 서버 기준 시각을 반영한다.
@@ -332,23 +381,45 @@ async function handleAttendanceObserved(msg) {
   const ci = numOrNull(msg.checkinMin);
   const co = numOrNull(msg.checkoutMin);
   const a = await getAttendance();
+  SsafyDebug.log("보고", "위젯 관찰 도착", {
+    입실: ci == null ? "없음" : hhmm(ci),
+    퇴실: co == null ? "없음" : hhmm(co),
+    바뀜: !(a.pageCheckinMin === ci && a.pageCheckoutMin === co),
+  });
   if (a.pageCheckinMin === ci && a.pageCheckoutMin === co) return { ok: true };
   a.date = todayStr();
   a.pageCheckinMin = ci;
   a.pageCheckoutMin = co;
   await chrome.storage.local.set({ attendance: a });
+
+  // 위젯에 시각이 찍혔다는 건 서버가 출석을 받았다는 뜻이라, 클릭 감지보다
+  // 확실한 근거다. 클릭 감지에만 기대면 폰으로 눌렀거나, 다른 PC에서 눌렀거나,
+  // 버튼 클릭 직후 페이지가 넘어가 보고가 유실된 경우에 "완료" 알림이 아예
+  // 오지 않는다. 아침 입실이 딱 그런 경우다 - 출근길에 폰으로 누르고 나면
+  // 이 브라우저에는 클릭 기록이 없어 입실 메시지만 조용히 빠졌다.
+  if (ci != null) await notifyAttendanceDone("checkin", ci);
+  if (co != null) await notifyAttendanceDone("checkout", co);
   return { ok: true };
 }
 
 // 미체크 경고는 일부러 매번 보낸다(점점 촘촘해지는 리마인더라 중복이 아님).
 async function handleMattermostWarning(totalMin) {
-  if (await isDayOff()) return; // 주말·공휴일·개인 휴무일에는 경고하지 않는다
+  const skip = (why) => SsafyDebug.log("경고", `${hhmm(totalMin)} 경고 건너뜀`, { why });
+
+  if (await isDayOff()) return skip("쉬는 날"); // 주말·공휴일·개인 휴무일에는 경고하지 않는다
 
   const s = await getMattermost();
-  if (!s.enabled || !s.notifyMissing) return;
-  if (!SsafyMattermost.isValidTarget(s.channel)) return;
+  if (!s.enabled) return skip("Mattermost 연동이 꺼져 있음");
+  if (!s.notifyMissing) return skip("미체크 경고가 꺼져 있음");
+  if (!SsafyMattermost.isValidTarget(s.channel)) return skip(`받을 곳이 올바르지 않음 (${s.channel})`);
 
   const a = await getAttendance();
+  SsafyDebug.log("경고", `${hhmm(totalMin)} 판단 시작`, {
+    클릭입실: a.checkinMin == null ? "없음" : hhmm(a.checkinMin),
+    클릭퇴실: a.checkoutMin == null ? "없음" : hhmm(a.checkoutMin),
+    위젯입실: a.pageCheckinMin == null ? "없음" : hhmm(a.pageCheckinMin),
+    위젯퇴실: a.pageCheckoutMin == null ? "없음" : hhmm(a.pageCheckoutMin),
+  });
   if (MM_WARN_CHECKIN_MINS.includes(totalMin)) {
     // 위젯에 입실 시각이 찍혀 있으면 폰으로 눌렀더라도 입실한 것이다.
     if (a.pageCheckinMin != null || a.checkinMin != null) return;

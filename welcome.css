@@ -1,53 +1,55 @@
 /* 설치 직후 랜딩 + 초기 설정 마법사.
  *
- * 잘 만든 제품 페이지들(Linear/Stripe/Vercel 계열)이 공통으로 지키는 것만
- * 가져왔다.
- *   1. 색을 아낀다. 거의 흑백으로 두고 강조색 하나에만 일을 시킨다.
- *   2. 글자에 힘을 준다. 제목은 크고 자간을 좁게, 본문은 조용하게.
- *   3. 여백을 필요해 보이는 것보다 더 준다.
- *   4. 깊이는 티 나지 않게. 그림자를 키우는 대신 1px 헤어라인으로 나눈다.
- *   5. 칸 크기를 다르게 짜서(벤토) 중요한 것이 더 큰 자리를 갖게 한다.
+ * 참고한 결(애플 계열 의료기기 UI):
+ *   1. 곡률을 크게. 칩과 버튼은 아예 알약 모양으로 둔다.
+ *   2. 어두운 바탕 위에는 반투명 유리 카드를 띄운다. 불투명하게 덮지 않고
+ *      뒤가 비치게 두어야 층이 생긴다.
+ *   3. 색은 상태에만 쓴다. 초록=정상, 빨강=경고. 나머지는 흑백.
+ *   4. 숫자를 크게, 라벨은 작고 조용하게 그 아래에.
+ *   5. 여백을 넉넉히, 경계는 1px 헤어라인으로.
  */
 :root {
-  --page: #f4f5f7;
+  --page: #f2f3f5;
   --surface: #ffffff;
-  --surface-2: #f7f8fa;
-  --line: #e7e9ed;
-  --line-2: #d9dce3;
+  --surface-2: #f7f8f9;
+  --line: #e9eaee;
+  --line-2: #dbdde3;
 
-  --ink: #0b0e14;
-  --ink-2: #353c49;
-  --muted: #676f7e;
-  /* 흐린 글자도 본문 크기가 작으므로 대비를 너무 낮추지 않는다 (약 4.3:1) */
-  --faint: #7f8797;
+  --ink: #0a0b0d;
+  --ink-2: #33363d;
+  --muted: #63666e;
+  /* 흐린 글자도 본문 크기가 작으므로 대비를 너무 낮추지 않는다 (약 4.4:1) */
+  --faint: #7c8087;
 
   /* 어두운 히어로 */
-  --dark: #0c0f16;
-  --on-dark: #f2f4f8;
-  --on-dark-2: #a4adbd;
+  --dark: #050506;
+  --on-dark: #f4f5f6;
+  --on-dark-2: #9ea1a8;
 
-  /* 강조색은 하나뿐이다. 실제 동작(빨강/주황)과 겹치지 않도록 파랑을 쓴다. */
-  --accent: #3457dc;
-  --accent-ink: #2440bd;
-  --accent-soft: #eef1fd;
+  /* 색은 상태에만. 초록이 "정상", 빨강이 "경고"다. */
+  --accent: #12b76a;
+  --accent-vivid: #3fe08d;
+  --accent-ink: #067a48;
+  --accent-soft: #e6f8ef;
 
-  --ok: #0a7a4f;
-  --ok-soft: #e9f6ef;
-  --danger: #d02a20;
+  --ok: #067a48;
+  --ok-soft: #e6f8ef;
+  --danger: #d8362f;
   --danger-soft: #fdf2f1;
   --danger-line: #f3c9c5;
   --warn: #a85a06;
   --warn-soft: #fdf8ec;
   --warn-line: #eeddb8;
 
-  --r-sm: 8px;
-  --r-md: 12px;
-  --r-lg: 18px;
-  --r-xl: 24px;
+  /* 곡률: 안쪽 요소일수록 작게 두어 모서리가 겹쳐 보이지 않게 한다. */
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 22px;
+  --r-xl: 30px;
+  --r-pill: 999px;
 
   /* 그림자는 두 겹으로 얇게. 하나만 크게 주면 붕 떠 보인다. */
-  --shadow: 0 1px 1px rgba(11, 14, 20, 0.03), 0 6px 16px -10px rgba(11, 14, 20, 0.14);
-  --shadow-lift: 0 1px 1px rgba(11, 14, 20, 0.04), 0 14px 30px -16px rgba(11, 14, 20, 0.22);
+  --shadow: 0 1px 1px rgba(10, 11, 13, 0.03), 0 6px 16px -10px rgba(10, 11, 13, 0.14);
 }
 
 * { box-sizing: border-box; }
@@ -73,7 +75,7 @@ body {
   overflow-wrap: break-word;
 }
 
-::selection { background: rgba(52, 87, 220, 0.16); }
+::selection { background: rgba(18, 183, 106, 0.18); }
 
 .page {
   max-width: 860px;
@@ -86,7 +88,9 @@ h1, h2, h3 {
 }
 b { font-weight: 600; }
 /* 시각(09:00 · 18:00)은 폭이 고정되어야 줄이 흔들리지 않는다. */
-.v, .rule .d, .summary, .list, .setting-main p { font-variant-numeric: tabular-nums; }
+.mv, .rule .d, .summary, .list, .setting-main p, .preview-stack {
+  font-variant-numeric: tabular-nums;
+}
 
 /* 아이콘은 전부 같은 규격으로 그린다 (선 굵기·라운드 통일). */
 svg {
@@ -114,17 +118,31 @@ svg {
 /* 어두운 히어로. 색 하나 없이도 대비만으로 시선을 먼저 잡는다. */
 .hero {
   position: relative;
-  padding: 76px 56px 68px;
+  padding: 72px 56px 60px;
   border-radius: var(--r-xl);
   background:
-    radial-gradient(115% 130% at 50% -30%, #222a3c 0%, rgba(34, 42, 60, 0) 58%),
-    radial-gradient(70% 90% at 88% 118%, rgba(52, 87, 220, 0.32) 0%, rgba(52, 87, 220, 0) 62%),
+    radial-gradient(110% 120% at 50% -25%, #1c2028 0%, rgba(28, 32, 40, 0) 60%),
+    radial-gradient(65% 85% at 84% 112%, rgba(18, 183, 106, 0.28) 0%, rgba(18, 183, 106, 0) 62%),
     var(--dark);
   color: var(--on-dark);
   text-align: center;
   overflow: hidden;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 24px 50px -30px rgba(11, 14, 20, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 26px 54px -32px rgba(0, 0, 0, 0.7);
 }
+/* 유리 카드 뒤에 초록 빛을 하나 깔아둔다. 유리는 뒤에 비칠 것이 있어야
+   유리처럼 보인다. 검정 위에 얹기만 하면 그냥 회색 상자다. */
+.hero::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -60px;
+  width: 540px;
+  height: 340px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: radial-gradient(50% 50% at 50% 50%, rgba(18, 183, 106, 0.34), rgba(18, 183, 106, 0) 72%);
+}
+
 /* 넓은 그라데이션은 그냥 두면 띠(banding)가 보인다. 아주 옅은 노이즈를
    덮어 띠를 지우고, 덤으로 화면이 평평해 보이지 않게 한다. */
 .hero::after {
@@ -144,8 +162,9 @@ svg {
   margin: 0 0 26px;
   padding: 6px 14px 6px 7px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(18px) saturate(1.4);
   color: var(--on-dark-2);
   font-size: 12.5px;
   font-weight: 600;
@@ -174,7 +193,139 @@ svg {
   gap: 14px;
   margin-top: 34px;
 }
-.hero-note { font-size: 12.5px; color: #7d8697; }
+.hero-note { font-size: 12.5px; color: #74777e; }
+
+/* ── 히어로 위의 유리 카드 ─────────────────────────────────── */
+/* 어두운 바탕을 불투명하게 덮지 않고 뒤가 비치게 둔다. 그래야 위에 뜬
+   것처럼 보인다. 내용은 확장이 실제로 알려주는 것과 같다. */
+.glass {
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(26px) saturate(1.6);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 18px 40px -22px rgba(0, 0, 0, 0.9);
+}
+
+.preview-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 392px;
+  margin: 46px auto 0;
+  text-align: left;
+}
+
+.pill-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px 8px 8px;
+  border-radius: var(--r-pill);
+}
+.pc-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--accent-vivid);
+}
+.pc-ico svg { width: 17px; height: 17px; }
+.pc-name { font-size: 13.5px; font-weight: 600; }
+.pc-clock {
+  margin-left: auto;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--on-dark-2);
+}
+
+.live-card {
+  padding: 20px 22px 18px;
+  border-radius: var(--r-lg);
+}
+.lc-label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--on-dark-2);
+}
+.lc-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 2px;
+}
+.lc-time {
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: -0.05em;
+  line-height: 1.2;
+}
+/* 초록 링: 실제로 감시 중이라는 신호. 숨쉬듯 아주 느리게 움직인다. */
+.lc-ring {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  flex: none;
+  border-radius: 50%;
+  border: 1.5px solid rgba(63, 224, 141, 0.5);
+  background: radial-gradient(circle at 50% 50%, rgba(18, 183, 106, 0.35), rgba(18, 183, 106, 0.05));
+  color: var(--accent-vivid);
+  animation: breathe 3.2s ease-in-out infinite;
+}
+.lc-ring svg { width: 19px; height: 19px; }
+@keyframes breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(63, 224, 141, 0.28); }
+  50% { box-shadow: 0 0 0 9px rgba(63, 224, 141, 0); }
+}
+.lc-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--on-dark-2);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.chip.on { color: var(--accent-vivid); }
+.chip.on::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* 상태 배지. 어두운 곳에서는 선명한 초록, 밝은 곳에서는 옅은 초록. */
+.badge {
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  background: var(--accent-vivid);
+  color: #05301d;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.badge.soft { background: var(--accent-soft); color: var(--accent-ink); }
 
 /* ── 벤토 그리드 ───────────────────────────────────────────── */
 .bento {
@@ -195,32 +346,38 @@ svg {
 .feature { grid-column: span 2; }
 
 /* 출석 규칙: 시각이 주인공이라 가장 크게 둔다. */
-.rule {
+.rule { display: flex; flex-direction: column; }
+.rule-top {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 .rule .k {
   font-size: 11.5px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--accent);
+  letter-spacing: 0.09em;
+  color: var(--faint);
 }
-.rule .v {
+/* 값은 크게, 라벨은 그 아래 작고 조용하게. */
+.metric {
   display: flex;
-  align-items: baseline;
-  gap: 7px;
-  font-size: 30px;
-  font-weight: 700;
-  letter-spacing: -0.04em;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 14px 18px 12px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
 }
-.rule .v .u {
-  font-size: 14px;
+.mv { font-size: 30px; font-weight: 700; letter-spacing: -0.045em; line-height: 1.15; }
+.ml {
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--muted);
+  letter-spacing: 0.04em;
+  color: var(--faint);
 }
-.rule .d { font-size: 13px; color: var(--muted); }
+.rule .d { margin: 14px 0 0; font-size: 13px; color: var(--muted); }
 
 .cell-head { margin-bottom: 20px; }
 .cell-head h2 { margin: 0; font-size: 16px; font-weight: 700; }
@@ -233,9 +390,9 @@ svg {
   width: 36px;
   height: 36px;
   margin-bottom: 15px;
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 .feature-ico svg { width: 19px; height: 19px; }
 .feature h3 { margin: 0 0 5px; font-size: 14.5px; font-weight: 700; }
@@ -258,6 +415,7 @@ svg {
   margin: 0;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow);
   background: var(--surface);
   overflow: hidden;
 }
@@ -440,8 +598,8 @@ svg {
   color: var(--accent);
 }
 .tag {
-  padding: 2px 8px;
-  border-radius: 999px;
+  padding: 3px 9px;
+  border-radius: var(--r-pill);
   font-size: 11px;
   letter-spacing: 0;
 }
@@ -513,12 +671,12 @@ svg {
 
 .pill {
   flex: none;
-  padding: 4px 10px;
-  border-radius: 999px;
+  padding: 5px 12px;
+  border-radius: var(--r-pill);
   font-size: 11.5px;
   font-weight: 700;
 }
-.pill.on { background: var(--ok-soft); color: var(--ok); }
+.pill.on { background: var(--accent-soft); color: var(--accent-ink); }
 
 .inline {
   display: flex;
@@ -532,10 +690,10 @@ svg {
 .inline.off { opacity: 0.4; pointer-events: none; }
 
 input[type="number"] {
-  width: 62px;
+  width: 64px;
   padding: 7px 8px;
   border: 1px solid var(--line-2);
-  border-radius: var(--r-sm);
+  border-radius: 12px;
   background: #fff;
   color: inherit;
   font-size: 14px;
@@ -546,7 +704,7 @@ input[type="number"] {
 }
 input[type="number"]:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(52, 87, 220, 0.14);
+  box-shadow: 0 0 0 3px rgba(18, 183, 106, 0.18);
   outline: none;
 }
 input:focus-visible,
@@ -568,9 +726,9 @@ summary:focus-visible {
 .track {
   display: block;
   position: relative;
-  width: 42px;
-  height: 24px;
-  border-radius: 999px;
+  width: 44px;
+  height: 26px;
+  border-radius: var(--r-pill);
   background: var(--line-2);
   transition: background 0.18s;
 }
@@ -578,14 +736,14 @@ summary:focus-visible {
   position: absolute;
   top: 3px;
   left: 3px;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 1px 2px rgba(11, 14, 20, 0.28);
   transition: transform 0.18s cubic-bezier(0.3, 0.8, 0.4, 1);
 }
-.switch input:checked + .track { background: var(--ink); }
+.switch input:checked + .track { background: var(--accent); }
 .switch input:checked + .track .knob { transform: translateX(18px); }
 .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -669,7 +827,7 @@ summary:focus-visible {
   background: var(--surface-2);
   color: var(--ink-2);
 }
-.status.ok { border-color: #c3e4d3; background: var(--ok-soft); color: var(--ok); }
+.status.ok { border-color: #bfe8d3; background: var(--ok-soft); color: var(--ok); }
 .status.err { border-color: var(--danger-line); background: var(--danger-soft); color: var(--danger); }
 .status.busy { color: var(--muted); }
 
@@ -711,9 +869,9 @@ summary:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 7px;
-  padding: 10px 18px;
+  padding: 10px 20px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--r-pill);
   background: none;
   font-size: 14px;
   font-weight: 600;
@@ -725,7 +883,7 @@ summary:focus-visible {
   transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.15s, opacity 0.15s;
 }
 .btn:disabled { opacity: 0.4; cursor: default; }
-.btn.lg { padding: 13px 24px; font-size: 15px; border-radius: 11px; }
+.btn.lg { padding: 14px 28px; font-size: 15px; }
 .btn .ico { transition: transform 0.18s cubic-bezier(0.3, 0.8, 0.4, 1); }
 .btn:not(:disabled):hover .ico { transform: translateX(2px); }
 

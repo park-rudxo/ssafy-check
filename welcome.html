@@ -31,20 +31,59 @@
             </button>
             <span class="hero-note">1분이면 끝납니다</span>
           </div>
+
+          <!-- 확장이 실제로 알려주는 내용을 그대로 옮긴 미리보기.
+               08:47 + 12분 30초 = 09:00 마감으로 숫자가 서로 맞는다. -->
+          <div class="preview-stack" aria-hidden="true">
+            <div class="glass pill-card">
+              <span class="pc-ico">
+                <svg viewBox="0 0 24 24"><path d="M3 12h3.5l2-5 3 10 2.5-5H21" /></svg>
+              </span>
+              <span class="pc-name">입실 체크</span>
+              <span class="badge">09:00 마감</span>
+              <span class="pc-clock">08:47</span>
+            </div>
+
+            <div class="glass live-card">
+              <p class="lc-label">남은 시간</p>
+              <div class="lc-row">
+                <span class="lc-time">12:30</span>
+                <span class="lc-ring">
+                  <svg viewBox="0 0 24 24"><path d="M3 12h3.5l2-5 3 10 2.5-5H21" /></svg>
+                </span>
+              </div>
+              <div class="lc-foot">
+                <span class="chip on">화면 강조 중</span>
+                <span class="chip">Mattermost 대기</span>
+              </div>
+            </div>
+          </div>
         </div>
       </header>
 
       <!-- 크기가 다른 칸을 한 판에 섞어, 중요한 것이 더 큰 자리를 차지하게 한다. -->
       <div class="bento">
         <article class="cell rule">
-          <span class="k">입실</span>
-          <span class="v">09:00<span class="u">이전</span></span>
-          <span class="d">08:59까지 눌러야 정상 출석</span>
+          <div class="rule-top">
+            <span class="k">입실</span>
+            <span class="badge soft">09:00 이전</span>
+          </div>
+          <div class="metric">
+            <span class="mv">09:00</span>
+            <span class="ml">마감 시각</span>
+          </div>
+          <p class="d">08:59까지 눌러야 정상 출석으로 남습니다.</p>
         </article>
         <article class="cell rule">
-          <span class="k">퇴실</span>
-          <span class="v">18:00<span class="u">이후</span></span>
-          <span class="d">18시 전 기록만 있으면 조퇴 처리</span>
+          <div class="rule-top">
+            <span class="k">퇴실</span>
+            <span class="badge soft">18:00 이후</span>
+          </div>
+          <div class="metric">
+            <span class="mv">18:00</span>
+            <span class="ml">가능 시각</span>
+          </div>
+          <p class="d">18시 전 기록만 있으면 조퇴로 처리됩니다.</p>
         </article>
 
         <article class="cell showcase">

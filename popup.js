@@ -13,6 +13,7 @@
   const MM_DEFAULTS = {
     enabled: false,
     channel: "",
+    webhookUrl: "",
     notifyCheckin: true,
     notifyCheckout: true,
     notifyMissing: true,
@@ -196,6 +197,12 @@
     document.getElementById("mm-missing").checked = mm.notifyMissing;
     document.getElementById("mm-controls").classList.toggle("disabled", !mm.enabled);
 
+    // 개인 웹훅이 있으면 다시 만들 이유가 없다. 버튼을 눌러도 되지만 상태를
+    // 보여주는 편이 "지금 어느 통로로 가고 있는지" 알기 쉽다.
+    document.getElementById("mm-provision").textContent = mm.webhookUrl
+      ? "✅ 내 계정으로 설정됨"
+      : "🔗 내 계정으로 자동 설정";
+
     // 예전 버전에서 받을 곳을 비운 채 켜둔 설정이 남아 있으면 지금은 아무것도
     // 보내지 않는다. 조용히 안 오는 것보다 이유를 알려주는 편이 낫다.
     if (mm.enabled && !SsafyMattermost.isValidTarget(mm.channel)) {
@@ -247,6 +254,39 @@
     // 다듬은 값을 입력창에 되돌려놓아 실제로 저장될 형태를 보여준다.
     el.value = res.value;
     return res;
+  }
+
+  // 내 계정으로 개인 웹훅을 만들고 아이디까지 채워 넣는다.
+  // 실패해도 연동 자체는 공용 웹훅으로 계속 굴러가므로, 막다른 길이 되지 않게
+  // 오류만 알려주고 기존 설정은 건드리지 않는다.
+  function provisionMattermost() {
+    const btn = document.getElementById("mm-provision");
+    if (mm.webhookUrl) {
+      setMmStatus("이미 내 계정으로 설정되어 있어요.", "ok");
+      return;
+    }
+    btn.disabled = true;
+    setMmStatus("Mattermost에서 설정을 만드는 중...");
+
+    ensureOriginPermission().then((perm) => {
+      if (!perm.ok) {
+        btn.disabled = false;
+        setMmStatus(perm.error, "err");
+        return;
+      }
+      SsafyMattermost.provisionPersonalWebhook()
+        .then((res) => {
+          mm.webhookUrl = res.webhookUrl;
+          mm.channel = res.channel;
+          saveMattermost();
+          btn.disabled = false;
+          setMmStatus(`✅ ${res.channel} 로 설정했어요. 테스트 메시지를 보내 확인해보세요.`, "ok");
+        })
+        .catch((e) => {
+          btn.disabled = false;
+          setMmStatus(e && e.message ? e.message : "자동 설정에 실패했어요.", e && e.blocked ? "" : "err");
+        });
+    });
   }
 
   function testMattermost() {
@@ -418,6 +458,7 @@
       });
     });
 
+    document.getElementById("mm-provision").addEventListener("click", provisionMattermost);
     document.getElementById("mm-test").addEventListener("click", testMattermost);
 
     document.getElementById("dev-enabled").addEventListener("change", (e) => {

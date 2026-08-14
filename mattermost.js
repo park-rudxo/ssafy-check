@@ -22,10 +22,12 @@
 (function (root) {
   "use strict";
 
-  // 고정 웹훅. 바꿔야 할 일이 생기면 여기 한 줄만 고치면 된다.
+  // 공용 웹훅. 개인 웹훅을 못 만든 사람만 여기로 물러난다.
   const WEBHOOK_URL = "https://meeting.ssafy.com/hooks/os38ib43ufrkumwckoffdyx7so";
   // 이 호스트에만 런타임 권한을 요청한다 (manifest의 optional_host_permissions).
   const WEBHOOK_ORIGIN = "https://meeting.ssafy.com/*";
+  const API_BASE = "https://meeting.ssafy.com/api/v4";
+  const HOOK_BASE = "https://meeting.ssafy.com/hooks/";
 
   // Mattermost가 계정을 만들 때 요구하는 사용자명 규칙을 그대로 옮긴 것이다.
   //   "사용자 아이디는 문자로 시작해야 하며 3~22 사이의 숫자, 문자 및
@@ -61,11 +63,96 @@
     return normalizeTarget(value).ok;
   }
 
+  // ── 개인 웹훅 자동 발급 ──────────────────────────────────────────────
+  // 공용 웹훅 하나로 전원에게 DM을 보내면, 그 웹훅을 만든 사람이 모든 DM 방의
+  // 참여자가 된다. 게다가 Mattermost는 보통 자기가 쓴 글에는 알림을 주지 않지만
+  // 웹훅이 쓴 글만은 예외로 글쓴이에게도 알림을 보낸다. 그래서 쓰는 사람이
+  // 늘어날수록 웹훅 주인 폰에만 남의 출석 알림이 쌓인다. 각자 자기 웹훅으로
+  // 자기한테 보내면 이 구조 자체가 사라진다.
+  //
+  // 예전에 개인 웹훅을 포기한 이유는 "통합 메뉴에 직접 들어가 만들기"가 길고
+  // 중간에 포기하기 쉬워서였다. 그 단계를 확장이 대신 밟아주면 그 이유가
+  // 없어진다. 로그인된 Mattermost 세션 쿠키를 그대로 쓰므로 사용자는 버튼 한
+  // 번만 누르면 되고, 아이디도 서버에서 읽어오니 오타로 조용히 실패하던 문제도
+  // 같이 사라진다.
+  const HOOK_NAME = "SSAFY 출석 알리미";
+
+  function hookUrl(id) {
+    return HOOK_BASE + id;
+  }
+
+  // 보낼 웹훅을 고른다. 개인 웹훅이 있으면 그걸 쓰고, 없으면 공용으로 물러난다.
+  // 저장된 값이 엉뚱한 주소여도 공용으로 떨어지게 모양을 확인한다.
+  function pickWebhookUrl(cfg) {
+    const own = cfg && typeof cfg.webhookUrl === "string" ? cfg.webhookUrl.trim() : "";
+    return own.startsWith(HOOK_BASE) ? own : WEBHOOK_URL;
+  }
+
+  // 쿠키로 인증된 요청은 CSRF 검사를 받는다. X-Requested-With 헤더가 있으면
+  // 브라우저가 보낸 XHR로 인정되어 통과한다. (서버가 엄격 모드를 켠 경우에는
+  // 이것만으로 부족한데, 그때는 아래에서 응답 코드를 그대로 알려준다)
+  async function api(path, body) {
+    let res;
+    try {
+      res = await fetch(API_BASE + path, {
+        method: body === undefined ? "GET" : "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } catch (e) {
+      throw new Error("Mattermost에 연결하지 못했어요. 잠시 후 다시 시도해주세요.");
+    }
+    if (res.status === 401) {
+      throw new Error("Mattermost에 로그인되어 있지 않아요. meeting.ssafy.com 에 로그인한 뒤 다시 눌러주세요.");
+    }
+    if (res.status === 403) {
+      // 이 계정에 웹훅 생성 권한이 없는 경우. 드문 일이 아니라서 부르는 쪽이
+      // 구분해 처리할 수 있게 표시를 달아준다.
+      const err = new Error("이 계정은 웹훅을 만들 권한이 없어요. 공용 웹훅으로 보냅니다.");
+      err.blocked = true;
+      throw err;
+    }
+    if (!res.ok) throw new Error(`Mattermost 응답 오류 (${res.status})`);
+    try {
+      return await res.json();
+    } catch (e) {
+      throw new Error("Mattermost 응답을 읽지 못했어요.");
+    }
+  }
+
+  // 성공하면 { webhookUrl, channel } 을 돌려준다. 실패는 throw로 알린다.
+  // 확장 페이지(팝업/설치 화면)에서 호출해야 한다 - 서비스 워커에는 이 호스트
+  // 권한을 사용자 동작 없이 받을 방법이 없다.
+  async function provisionPersonalWebhook() {
+    const me = await api("/users/me");
+    if (!me || !me.id || !me.username) throw new Error("내 계정 정보를 읽지 못했어요.");
+
+    // "나와의 대화" 채널. 양쪽을 같은 사람으로 주면 된다. 이미 있으면 그대로
+    // 돌려주므로 여러 번 불러도 채널이 늘어나지 않는다.
+    const dm = await api("/channels/direct", [me.id, me.id]);
+    if (!dm || !dm.id) throw new Error("나와의 대화 채널을 만들지 못했어요.");
+
+    const hook = await api("/hooks/incoming", {
+      channel_id: dm.id,
+      display_name: HOOK_NAME,
+      description: "SSAFY 출석 체크 알리미 확장이 자동으로 만든 웹훅",
+    });
+    if (!hook || !hook.id) throw new Error("웹훅을 만들지 못했어요.");
+
+    return { webhookUrl: hookUrl(hook.id), channel: "@" + me.username };
+  }
+
   root.SsafyMattermost = {
     WEBHOOK_URL,
     WEBHOOK_ORIGIN,
     normalizeTarget,
     isValidTarget,
+    pickWebhookUrl,
+    provisionPersonalWebhook,
     ERR_EMPTY,
     ERR_SHAPE,
   };

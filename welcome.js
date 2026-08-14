@@ -8,6 +8,7 @@
   const MM_DEFAULTS = {
     enabled: false,
     channel: "",
+    webhookUrl: "",
     notifyCheckin: true,
     notifyCheckout: true,
     notifyMissing: true,
@@ -90,6 +91,36 @@
         });
       });
     });
+  }
+
+  // 내 계정으로 개인 웹훅을 만들고 아이디 칸까지 채운다.
+  // 실패해도 이 단계가 막히면 안 되므로, 아이디를 직접 넣는 길은 그대로 둔다.
+  function provisionMattermost() {
+    const btn = $("mm-provision");
+    btn.disabled = true;
+    setStatus("Mattermost에서 설정을 만드는 중...");
+
+    return ensureOriginPermission()
+      .then((perm) => {
+        if (!perm.ok) throw new Error(perm.error);
+        return SsafyMattermost.provisionPersonalWebhook();
+      })
+      .then((res) => {
+        mm = { ...mm, webhookUrl: res.webhookUrl, channel: res.channel };
+        $("mm-channel").value = res.channel;
+        return save({ mattermost: mm }).then(() => {
+          btn.disabled = false;
+          btn.textContent = "✅ 내 계정으로 설정됨";
+          setStatus(`✅ ${res.channel} 로 설정했어요. 이제 테스트 메시지를 보내보세요.`, "ok");
+        });
+      })
+      .catch((e) => {
+        btn.disabled = false;
+        setStatus(
+          (e && e.message ? e.message : "자동 설정에 실패했어요.") + " 아이디를 직접 넣어도 됩니다.",
+          e && e.blocked ? "" : "err"
+        );
+      });
   }
 
   // 화면의 값을 저장하고, 권한까지 받아 실제로 보낼 수 있는 상태로 만든다.
@@ -206,6 +237,7 @@
     $("ao-enabled").addEventListener("change", saveAutoOpen);
     $("ao-min").addEventListener("change", saveAutoOpen);
 
+    $("mm-provision").addEventListener("click", provisionMattermost);
     $("mm-test").addEventListener("click", testMattermost);
     $("mm-next").addEventListener("click", () => {
       // 아무것도 안 적었으면 연동 없이 넘어간다 (이 단계는 선택).
@@ -236,6 +268,7 @@
         $("ao-min").value = autoOpen.minutesBefore;
         $("ao-row").classList.toggle("off", !autoOpen.enabled);
         $("mm-channel").value = mm.channel;
+        if (mm.webhookUrl) $("mm-provision").textContent = "✅ 내 계정으로 설정됨";
         show(1);
       });
     } catch (e) {

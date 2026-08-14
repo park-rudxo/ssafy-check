@@ -44,6 +44,9 @@ try {
     isValidTarget() {
       return false;
     },
+    pickWebhookUrl() {
+      return "";
+    },
   };
 }
 
@@ -156,6 +159,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
 const MM_DEFAULTS = {
   enabled: false,
   channel: "", // 반드시 "@아이디" (개인 메시지). 비면 아예 보내지 않는다.
+  // 확장이 사용자 계정으로 발급한 개인 웹훅. 있으면 공용 웹훅 대신 이걸 쓴다.
+  // 이게 있으면 글쓴이가 본인이라, 공용 웹훅 주인에게 남의 알림이 가지 않는다.
+  webhookUrl: "",
   notifyCheckin: true,
   notifyCheckout: true,
   notifyMissing: true,
@@ -221,9 +227,9 @@ async function postToMattermost(text, cfg) {
 
   // 받는 사람은 반드시 "@아이디"여야 한다. 비어 있으면 Webhook의 기본 채널로
   // 가버려서 그 방 사람들 전원에게 알림이 울리므로, 여기서 막는다.
-  // 웹훅이 모두 같은 하나이기 때문에 이걸 놓치면 반 전체가 서로의 알림을
-  // 받게 된다. (설정 화면에서도 막지만, 예전 버전에서 비워둔 채 저장된
-  // 설정이 남아 있을 수 있어 실제 전송 직전에 한 번 더 확인한다)
+  // 공용 웹훅으로 물러난 사람들은 웹훅이 같은 하나라, 이걸 놓치면 반 전체가
+  // 서로의 알림을 받게 된다. (설정 화면에서도 막지만, 예전 버전에서 비워둔 채
+  // 저장된 설정이 남아 있을 수 있어 실제 전송 직전에 한 번 더 확인한다)
   // DM은 Mattermost 기본 설정에서 폰 푸시가 오기 때문에 알림용으로도 가장
   // 확실하다.
   const target = SsafyMattermost.normalizeTarget(s.channel);
@@ -244,7 +250,7 @@ async function postToMattermost(text, cfg) {
   };
 
   try {
-    const res = await fetch(SsafyMattermost.WEBHOOK_URL, {
+    const res = await fetch(SsafyMattermost.pickWebhookUrl(s), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

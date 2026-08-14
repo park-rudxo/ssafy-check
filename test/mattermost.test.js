@@ -119,3 +119,21 @@ test("isValidTarget은 normalizeTarget의 판정과 같다", () => {
   assert.equal(MM.isValidTarget(""), false);
   assert.equal(MM.isValidTarget("박경도"), false);
 });
+
+// ── 개인 웹훅 고르기 ──────────────────────────────────────────────────
+// 개인 웹훅이 있으면 그걸 써야 공용 웹훅 주인에게 남의 출석 알림이 가지 않는다.
+// 반대로 저장된 값이 엉뚱하면 조용히 아무 데도 안 보내는 것보다 공용으로
+// 물러나는 편이 낫다 - 알림이 끊기는 쪽이 사용자에게 더 나쁜 실패다.
+test("개인 웹훅이 있으면 그걸 쓴다", () => {
+  const own = "https://meeting.ssafy.com/hooks/aaaaaaaaaaaaaaaaaaaaaaaaaa";
+  assert.equal(MM.pickWebhookUrl({ webhookUrl: own }), own);
+  assert.equal(MM.pickWebhookUrl({ webhookUrl: "  " + own + "  " }), own);
+});
+
+test("개인 웹훅이 없거나 모양이 이상하면 공용 웹훅으로 물러난다", () => {
+  for (const v of [undefined, null, "", "   ", 123, "https://evil.example/hooks/x", "hooks/x"]) {
+    assert.equal(MM.pickWebhookUrl({ webhookUrl: v }), MM.WEBHOOK_URL, `${JSON.stringify(v)}`);
+  }
+  assert.equal(MM.pickWebhookUrl(undefined), MM.WEBHOOK_URL);
+  assert.equal(MM.pickWebhookUrl({}), MM.WEBHOOK_URL);
+});

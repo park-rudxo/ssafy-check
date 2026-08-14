@@ -207,7 +207,8 @@
       line-height: 1.6;
     }
     .setup-gate[hidden] { display: none; }
-    .setup-gate b { display: block; margin-bottom: 4px; font-size: 14px; }
+    /* 제목만 블록. 본문 안의 강조까지 블록이 되면 문장이 토막난다. */
+    .setup-gate > b:first-child { display: block; margin-bottom: 4px; font-size: 14px; }
     .setup-gate button { margin-top: 8px; background: #c62828; }
 
     /* 진단 로그 */
@@ -275,6 +276,17 @@
       cursor: pointer;
     }
     .btn-test { background: #4a5f7a; }
+    /* 앱에만 로그인해서 연결이 실패하는 사고를 막는 안내 */
+    .mm-warn {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      border-left: 3px solid #e53935;
+      background: #fdecec;
+      color: #b3261e;
+      font-size: 11.5px;
+      line-height: 1.55;
+    }
     .mm-note {
       margin-top: 8px;
       color: #888;
@@ -379,7 +391,8 @@
   </div>
   <div id="setup-gate" class="setup-gate" hidden>
     <b>⚙️ 설정을 마쳐야 동작합니다</b>
-    Mattermost에 로그인하고 연결해야 자리를 비웠을 때도 폰으로 받을 수 있어요.
+    <b>크롬에서</b> Mattermost 웹에 로그인하고 연결해야 자리를 비웠을 때도 폰으로 받을 수 있어요.
+    (데스크탑 앱 로그인은 인식되지 않습니다)
     설정 전에는 화면 강조도 켜지지 않습니다.
     <button id="setup-gate-go">Mattermost 로그인하여 시작하기</button>
   </div>
@@ -433,10 +446,13 @@
         <div class="field">
           <span class="field-label">내 계정 연결</span>
           <button id="mm-provision" class="btn-test">🔗 Mattermost 로그인하여 시작하기</button>
-          <button id="mm-open" class="btn-link">🌐 Mattermost 열기 (로그인 확인)</button>
+          <button id="mm-open" class="btn-link">🌐 크롬에서 Mattermost 웹 열기 (로그인 확인)</button>
           <div class="time-hint" id="mm-who"></div>
+          <div class="mm-warn">
+            ⚠️ <b>데스크탑 앱 로그인은 인식되지 않아요.</b>
+            반드시 <b>이 크롬 브라우저에서 웹페이지(meeting.ssafy.com)로 로그인</b>한 뒤 연결하세요.
+          </div>
           <div class="time-hint">
-            <b>Mattermost에 로그인되어 있어야</b> 합니다. 안 되면 위 버튼으로 먼저 로그인하세요.
             내 계정으로 <b>내 전용 알림 통로</b>를 만들고 아이디도 서버에서 읽어옵니다 —
             내 알림이 나에게만 가고, 아이디를 잘못 적을 일도 없어요.
           </div>

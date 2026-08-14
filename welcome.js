@@ -66,6 +66,9 @@
     const done = SsafyMattermost.isConfigured(mm);
     $("mm-provision").textContent = done ? "✅ 다시 연결하기" : "🔗 내 계정 연결하기";
     $("mm-who").textContent = done ? `연결됨: ${mm.channel} — 내 전용 통로로 나에게만 갑니다.` : "";
+    // 연결 전에는 보낼 곳이 없다. 눌러도 실패만 하는 버튼을 열어두면
+    // 순서가 있다는 것 자체가 안 보인다.
+    $("mm-test").disabled = !done;
   }
 
   function setStatus(text, kind) {

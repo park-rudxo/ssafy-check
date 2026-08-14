@@ -191,22 +191,25 @@
   // ── Mattermost ─────────────────────────────────────────────────────
   function renderMattermost() {
     document.getElementById("mm-enabled").checked = mm.enabled;
-    document.getElementById("mm-channel").value = mm.channel;
     document.getElementById("mm-checkin").checked = mm.notifyCheckin;
     document.getElementById("mm-checkout").checked = mm.notifyCheckout;
     document.getElementById("mm-missing").checked = mm.notifyMissing;
     document.getElementById("mm-controls").classList.toggle("disabled", !mm.enabled);
 
-    // 개인 웹훅이 있으면 다시 만들 이유가 없다. 버튼을 눌러도 되지만 상태를
-    // 보여주는 편이 "지금 어느 통로로 가고 있는지" 알기 쉽다.
-    document.getElementById("mm-provision").textContent = mm.webhookUrl
-      ? "✅ 내 계정으로 설정됨"
-      : "🔗 내 계정으로 자동 설정";
+    // 연결이 끝났으면 누구로 연결됐는지 보여준다. 아이디를 손으로 넣을 수
+    // 없으므로, 이게 "제대로 내 계정에 붙었는지" 확인하는 유일한 창이다.
+    const done = SsafyMattermost.isConfigured(mm);
+    document.getElementById("mm-provision").textContent = done
+      ? "✅ 다시 연결하기"
+      : "🔗 Mattermost 로그인하여 시작하기";
+    document.getElementById("mm-who").textContent = done
+      ? `연결됨: ${mm.channel} — 내 전용 통로로 나에게만 갑니다.`
+      : "";
 
-    // 예전 버전에서 받을 곳을 비운 채 켜둔 설정이 남아 있으면 지금은 아무것도
-    // 보내지 않는다. 조용히 안 오는 것보다 이유를 알려주는 편이 낫다.
-    if (mm.enabled && !SsafyMattermost.isValidTarget(mm.channel)) {
-      setMmStatus("받을 곳에 @내아이디를 입력해야 메시지가 갑니다.", "err");
+    // 예전 버전에서 설정이 덜 된 채로 켜둔 값이 남아 있을 수 있다. 조용히
+    // 안 오는 것보다 이유를 알려주는 편이 낫다.
+    if (mm.enabled && !done) {
+      setMmStatus("연결이 끝나지 않았어요. 위 버튼을 눌러주세요.", "err");
     }
 
     renderSetupGate();
@@ -248,25 +251,11 @@
     });
   }
 
-  // 받을 곳은 반드시 "@아이디"(개인 메시지)여야 한다. 비워두면 웹훅 채널에
-  // 있는 사람 전원에게 알림이 가기 때문에, 입력창 단계에서 막는다.
-  function readTarget() {
-    const el = document.getElementById("mm-channel");
-    const res = SsafyMattermost.normalizeTarget(el.value);
-    // 다듬은 값을 입력창에 되돌려놓아 실제로 저장될 형태를 보여준다.
-    el.value = res.value;
-    return res;
-  }
-
-  // 내 계정으로 개인 웹훅을 만들고 아이디까지 채워 넣는다.
-  // 실패해도 연동 자체는 공용 웹훅으로 계속 굴러가므로, 막다른 길이 되지 않게
-  // 오류만 알려주고 기존 설정은 건드리지 않는다.
+  // 내 계정으로 웹훅을 만들고 아이디까지 채워 넣는다. 실패하면 오류만 알리고
+  // 기존 설정은 건드리지 않는다 - 이미 연결돼 있던 사람이 재시도했다가
+  // 오히려 연결을 잃으면 안 된다.
   function provisionMattermost() {
     const btn = document.getElementById("mm-provision");
-    if (mm.webhookUrl) {
-      setMmStatus("이미 내 계정으로 설정되어 있어요.", "ok");
-      return;
-    }
     btn.disabled = true;
     setMmStatus("Mattermost에서 설정을 만드는 중...");
 
@@ -280,9 +269,12 @@
         .then((res) => {
           mm.webhookUrl = res.webhookUrl;
           mm.channel = res.channel;
+          // 여기까지 왔으면 보낼 곳도 보낼 대상도 확정이다. 따로 켜게 두면
+          // 연결만 해놓고 안 켠 상태로 남아 아무것도 안 오는 사람이 생긴다.
+          mm.enabled = true;
           saveMattermost();
           btn.disabled = false;
-          setMmStatus(`✅ ${res.channel} 로 설정했어요. 테스트 메시지를 보내 확인해보세요.`, "ok");
+          setMmStatus(`✅ ${res.channel} 로 연결했어요. 테스트 메시지를 보내 확인해보세요.`, "ok");
         })
         .catch((e) => {
           btn.disabled = false;
@@ -293,12 +285,10 @@
 
   function testMattermost() {
     const btn = document.getElementById("mm-test");
-    const target = readTarget();
-    if (!target.ok) {
-      setMmStatus(target.error, "err");
+    if (!SsafyMattermost.isConfigured(mm)) {
+      setMmStatus("먼저 [Mattermost 로그인하여 시작하기]를 눌러 연결해주세요.", "err");
       return;
     }
-    const channel = target.value;
     btn.disabled = true;
     setMmStatus("보내는 중...");
 
@@ -308,25 +298,17 @@
         setMmStatus(perm.error, "err");
         return;
       }
-      // 권한을 받은 뒤 화면의 최신 값으로 저장하고 전송한다.
-      mm.channel = channel;
-      chrome.storage.local.set({ mattermost: mm }, () => {
-        renderMattermost();
-        chrome.runtime.sendMessage({ type: "mattermostTest" }, (res) => {
-          btn.disabled = false;
-          if (chrome.runtime.lastError || !res) {
-            setMmStatus("전송 실패. 잠시 후 다시 시도해주세요.", "err");
-            return;
-          }
-          if (!res.ok) {
-            setMmStatus("전송 실패: " + (res.error || "알 수 없는 오류"), "err");
-            return;
-          }
-          // 아이디가 맞는지는 여기서 확인할 방법이 없다. 없는 아이디여도
-          // 서버가 오류를 주지 않는 경우가 있어서, "도착했는지 직접 보라"고
-          // 시키는 것이 유일하게 확실한 검증이다.
-          setMmStatus(`✅ ${channel} 로 테스트를 보냈어요. Mattermost에 도착했는지 확인하세요. 안 왔으면 아이디가 틀린 거예요.`, "ok");
-        });
+      chrome.runtime.sendMessage({ type: "mattermostTest" }, (res) => {
+        btn.disabled = false;
+        if (chrome.runtime.lastError || !res) {
+          setMmStatus("전송 실패. 잠시 후 다시 시도해주세요.", "err");
+          return;
+        }
+        if (!res.ok) {
+          setMmStatus("전송 실패: " + (res.error || "알 수 없는 오류"), "err");
+          return;
+        }
+        setMmStatus(`✅ ${mm.channel} 로 테스트를 보냈어요. Mattermost에 도착했는지 확인하세요.`, "ok");
       });
     });
   }
@@ -460,11 +442,8 @@
         return;
       }
       // 켤 때 Webhook 호스트 권한을 함께 요청한다 (체크박스 클릭이 사용자 제스처).
-      // 받을 곳이 비어 있어도 스위치 자체는 켜준다. 여기서 도로 꺼버리면
-      // 설정 칸이 다시 잠겨(.mm-controls.disabled) 받을 곳을 입력할 방법이
-      // 없어진다. 대신 무엇이 부족한지 알리고, 실제 전송은 background에서
-      // 막는다 - 받을 곳이 없는 동안에는 한 건도 나가지 않는다.
-      const target = readTarget();
+      // 스위치 자체는 일단 켜준다. 여기서 도로 꺼버리면 설정 칸이 다시
+      // 잠겨(.mm-controls.disabled) 연결 버튼을 누를 방법이 없어진다.
       ensureOriginPermission().then((perm) => {
         if (!perm.ok) {
           mm.enabled = false;
@@ -474,33 +453,13 @@
           return;
         }
         mm.enabled = true;
-        mm.channel = target.value;
         saveMattermost();
-        if (!target.ok) {
-          setMmStatus(target.error, "err");
-          return;
-        }
-        // 켜자마자 테스트를 보낸다. 아이디를 잘못 적었는지 알 수 있는 방법은
-        // "도착했는지 보는 것"뿐이라, 확인을 나중으로 미루면 정작 필요한 날
+        // 아직 연결 전이면 연결부터 시킨다. 이미 연결돼 있으면 바로 테스트해서
+        // 실제로 도착하는지 확인하게 한다 - 확인을 미루면 정작 필요한 날
         // 아무것도 안 오는 걸로 알게 된다.
-        testMattermost();
+        if (SsafyMattermost.isConfigured(mm)) testMattermost();
+        else provisionMattermost();
       });
-    });
-
-    document.getElementById("mm-channel").addEventListener("change", () => {
-      const target = readTarget();
-      // 잘못된 값도 그대로 저장해둔다. 지워버리면 방금 친 내용이 사라져
-      // 무엇을 고쳐야 하는지 알 수 없다. 실제 전송은 background에서 막으므로
-      // 이 상태로 저장돼 있어도 채널로 새어나가지 않는다.
-      mm.channel = target.value;
-      saveMattermost();
-      if (!target.ok) {
-        setMmStatus(target.error, "err");
-        return;
-      }
-      // 아이디를 고쳤으면 바로 다시 테스트해서 이번엔 맞는지 확인하게 한다.
-      if (mm.enabled) testMattermost();
-      else setMmStatus("");
     });
 
     [

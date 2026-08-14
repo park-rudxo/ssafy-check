@@ -379,9 +379,9 @@
   </div>
   <div id="setup-gate" class="setup-gate" hidden>
     <b>⚙️ 설정을 마쳐야 동작합니다</b>
-    Mattermost 알림을 설정해야 자리를 비웠을 때도 폰으로 받을 수 있어요.
+    Mattermost에 로그인하고 연결해야 자리를 비웠을 때도 폰으로 받을 수 있어요.
     설정 전에는 화면 강조도 켜지지 않습니다.
-    <button id="setup-gate-go">지금 설정하기</button>
+    <button id="setup-gate-go">Mattermost 로그인하여 시작하기</button>
   </div>
   <div id="status" class="status idle">상태 확인 중...</div>
   <ul>
@@ -431,22 +431,14 @@
 
       <div class="mm-controls" id="mm-controls">
         <div class="field">
-          <span class="field-label">내 계정으로 설정</span>
-          <button id="mm-provision" class="btn-test">🔗 내 계정으로 자동 설정</button>
+          <span class="field-label">내 계정 연결</span>
+          <button id="mm-provision" class="btn-test">🔗 Mattermost 로그인하여 시작하기</button>
           <button id="mm-open" class="btn-link">🌐 Mattermost 열기 (로그인 확인)</button>
+          <div class="time-hint" id="mm-who"></div>
           <div class="time-hint">
-            <b>Mattermost에 로그인되어 있어야</b> 자동 설정이 됩니다. 안 되면 위 버튼으로 먼저 로그인하세요.
-            자동 설정은 <b>내 전용 알림 통로</b>를 만들고 아이디도 자동으로 채웁니다 — 이러면 내 알림이 나에게만 가요.
-            (권한이 막힌 계정은 공용 통로로 자동 전환)
-          </div>
-        </div>
-
-        <div class="field">
-          <span class="field-label">받을 곳 (필수)</span>
-          <input type="text" id="mm-channel" placeholder="@내아이디" />
-          <div class="time-hint">
-            <b>반드시 자기 아이디만 넣으세요.</b> 남의 아이디를 넣으면 그 사람에게 갑니다.
-            (Mattermost 프로필의 영문 사용자명)
+            <b>Mattermost에 로그인되어 있어야</b> 합니다. 안 되면 위 버튼으로 먼저 로그인하세요.
+            내 계정으로 <b>내 전용 알림 통로</b>를 만들고 아이디도 서버에서 읽어옵니다 —
+            내 알림이 나에게만 가고, 아이디를 잘못 적을 일도 없어요.
           </div>
         </div>
 

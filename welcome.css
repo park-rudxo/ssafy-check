@@ -9,47 +9,47 @@
  *   5. 여백을 넉넉히, 경계는 1px 헤어라인으로.
  */
 :root {
-  --page: #f2f3f5;
-  --surface: #ffffff;
-  --surface-2: #f7f8f9;
-  --line: #e9eaee;
-  --line-2: #dbdde3;
+  /* 화면 전체가 어둡다. 카드는 검정을 덮는 대신 흰빛을 아주 옅게 얹어
+     만든다. 그래야 층이 생기고, 뒤가 비치는 유리로 보인다. */
+  --page: #05060a;
+  --surface: rgba(255, 255, 255, 0.05);
+  --surface-2: rgba(255, 255, 255, 0.035);
+  --line: rgba(255, 255, 255, 0.09);
+  --line-2: rgba(255, 255, 255, 0.16);
 
-  --ink: #0a0b0d;
-  --ink-2: #33363d;
-  --muted: #63666e;
-  /* 흐린 글자도 본문 크기가 작으므로 대비를 너무 낮추지 않는다 (약 4.4:1) */
-  --faint: #7c8087;
+  --ink: #f1f3f5;
+  --ink-2: #ccd1d8;
+  --muted: #969ca6;
+  /* 흐린 글자도 본문 크기가 작으므로 대비를 너무 낮추지 않는다 */
+  --faint: #7d838d;
 
-  /* 어두운 히어로 */
-  --dark: #050506;
-  --on-dark: #f4f5f6;
-  --on-dark-2: #9ea1a8;
+  /* 히어로·패널 머리처럼 한 단 더 짙은 자리 */
+  --dark: #05060a;
 
   /* 색은 하나만 쓴다. 하늘색이 "켜짐/정상", 빨강이 "경고"다.
-     밝은 곳과 어두운 곳에서 같은 색이 다르게 보이므로 두 단계로 나눠 둔다. */
+     어두운 바탕에서는 채도를 낮추고 밝기를 올려야 글자가 읽힌다. */
   --accent: #3ba3dc;
   --accent-vivid: #8fd3f7;
-  --accent-ink: #0a6293;
-  --accent-soft: #e9f4fb;
-  --accent-line: #c5e2f4;
+  --accent-ink: #9ad8f8;
+  --accent-soft: rgba(59, 163, 220, 0.16);
+  --accent-line: rgba(143, 211, 247, 0.3);
 
   /* 출석이 "정상"이라는 뜻만 초록이 맡는다. 화면 전반의 하늘색과 역할이
      겹치지 않도록, 출석 시각·감시 중 표시에만 쓴다. */
-  --good: #12a05f;
+  --good: #4ad48d;
   --good-vivid: #4ad48d;
-  --good-ink: #0a7245;
-  --good-soft: #e7f7ef;
+  --good-ink: #7ce3b2;
+  --good-soft: rgba(74, 212, 141, 0.16);
 
   /* 조작 성공 메시지는 화면 색(하늘색)을 따른다. */
-  --ok: #0a6293;
-  --ok-soft: #e9f4fb;
-  --danger: #d8362f;
-  --danger-soft: #fdf2f1;
-  --danger-line: #f3c9c5;
-  --warn: #a85a06;
-  --warn-soft: #fdf8ec;
-  --warn-line: #eeddb8;
+  --ok: #9ad8f8;
+  --ok-soft: rgba(59, 163, 220, 0.14);
+  --danger: #ff8f87;
+  --danger-soft: rgba(216, 54, 47, 0.16);
+  --danger-line: rgba(255, 143, 135, 0.32);
+  --warn: #f0c47e;
+  --warn-soft: rgba(240, 165, 30, 0.13);
+  --warn-line: rgba(240, 196, 126, 0.3);
 
   /* 곡률: 안쪽 요소일수록 작게 두어 모서리가 겹쳐 보이지 않게 한다. */
   --r-sm: 10px;
@@ -58,8 +58,9 @@
   --r-xl: 30px;
   --r-pill: 999px;
 
-  /* 그림자는 두 겹으로 얇게. 하나만 크게 주면 붕 떠 보인다. */
-  --shadow: 0 1px 1px rgba(10, 11, 13, 0.03), 0 6px 16px -10px rgba(10, 11, 13, 0.14);
+  /* 어두운 화면에서 그림자는 잘 보이지 않는다. 깊이는 그림자 대신
+     헤어라인과 위쪽 안쪽 하이라이트로 낸다. */
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 14px 30px -20px rgba(0, 0, 0, 0.8);
 }
 
 * { box-sizing: border-box; }
@@ -71,8 +72,8 @@
 html {
   min-height: 100%;
   background:
-    radial-gradient(58% 42% at 10% 2%, rgba(59, 163, 220, 0.17), rgba(59, 163, 220, 0) 70%),
-    radial-gradient(52% 42% at 94% 80%, rgba(59, 163, 220, 0.14), rgba(59, 163, 220, 0) 72%),
+    radial-gradient(56% 40% at 8% 0%, rgba(59, 163, 220, 0.16), rgba(59, 163, 220, 0) 70%),
+    radial-gradient(50% 40% at 96% 82%, rgba(59, 163, 220, 0.12), rgba(59, 163, 220, 0) 72%),
     var(--page);
   background-attachment: fixed;
 }
@@ -92,7 +93,7 @@ body {
   overflow-wrap: break-word;
 }
 
-::selection { background: rgba(59, 163, 220, 0.22); }
+::selection { background: rgba(143, 211, 247, 0.28); }
 
 .page {
   max-width: 860px;
@@ -138,16 +139,17 @@ svg {
   position: relative;
   overflow: hidden;
   background:
-    radial-gradient(110% 120% at 50% -25%, #1c2028 0%, rgba(28, 32, 40, 0) 60%),
-    radial-gradient(65% 85% at 84% 112%, rgba(59, 163, 220, 0.3) 0%, rgba(59, 163, 220, 0) 62%),
-    var(--dark);
-  color: var(--on-dark);
+    radial-gradient(110% 120% at 50% -25%, #20252f 0%, rgba(32, 37, 47, 0) 60%),
+    radial-gradient(65% 85% at 84% 112%, rgba(59, 163, 220, 0.32) 0%, rgba(59, 163, 220, 0) 62%),
+    #0b0d13;
+  color: var(--ink);
 }
 .hero {
   padding: 72px 56px 60px;
+  border: 1px solid var(--line);
   border-radius: var(--r-xl);
   text-align: center;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 26px 54px -32px rgba(0, 0, 0, 0.7);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09), 0 26px 54px -32px rgba(0, 0, 0, 0.9);
 }
 /* 유리 카드 뒤에 하늘빛을 하나 깔아둔다. 유리는 뒤에 비칠 것이 있어야
    유리처럼 보인다. 검정 위에 얹기만 하면 그냥 회색 상자다. */
@@ -185,7 +187,7 @@ svg {
   border-radius: var(--r-pill);
   background: rgba(255, 255, 255, 0.06);
   backdrop-filter: blur(18px) saturate(1.4);
-  color: var(--on-dark-2);
+  color: var(--ink-2);
   font-size: 12.5px;
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -202,7 +204,7 @@ svg {
 .hero-sub {
   max-width: 30em;
   margin: 20px auto 0;
-  color: var(--on-dark-2);
+  color: var(--muted);
   font-size: 16px;
   line-height: 1.7;
 }
@@ -213,7 +215,7 @@ svg {
   gap: 14px;
   margin-top: 34px;
 }
-.hero-note { font-size: 12.5px; color: #74777e; }
+.hero-note { font-size: 12.5px; color: var(--faint); }
 
 /* ── 히어로 위의 유리 카드 ─────────────────────────────────── */
 /* 어두운 바탕을 불투명하게 덮지 않고 뒤가 비치게 둔다. 그래야 위에 뜬
@@ -251,7 +253,7 @@ svg {
   height: 32px;
   flex: none;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--good-soft);
   color: var(--good-vivid);
 }
 .pc-ico svg { width: 17px; height: 17px; }
@@ -260,7 +262,7 @@ svg {
   margin-left: auto;
   font-size: 13.5px;
   font-weight: 600;
-  color: var(--on-dark-2);
+  color: var(--muted);
 }
 
 .live-card {
@@ -272,7 +274,7 @@ svg {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.03em;
-  color: var(--on-dark-2);
+  color: var(--muted);
 }
 .lc-row {
   display: flex;
@@ -312,7 +314,7 @@ svg {
   gap: 6px;
   margin-top: 16px;
   padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--line);
 }
 .chip {
   display: inline-flex;
@@ -321,7 +323,7 @@ svg {
   padding: 5px 11px;
   border-radius: var(--r-pill);
   background: rgba(255, 255, 255, 0.08);
-  color: var(--on-dark-2);
+  color: var(--muted);
   font-size: 11.5px;
   font-weight: 600;
 }
@@ -358,15 +360,14 @@ svg {
   gap: 14px;
   margin-top: 14px;
 }
-/* 히어로의 유리와 같은 결. 밝은 쪽에서는 흰색을 살짝 비치게 둔다. */
+/* 히어로의 유리와 같은 결. 검정을 덮는 대신 흰빛을 옅게 얹는다. */
 .cell, .panel, .cta {
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--line);
+  background: var(--surface);
   backdrop-filter: blur(24px) saturate(1.4);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.6),
-    0 1px 1px rgba(10, 11, 13, 0.03),
-    0 10px 24px -14px rgba(10, 11, 13, 0.18);
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    var(--shadow);
 }
 .cell {
   padding: 24px 26px;
@@ -442,13 +443,14 @@ svg {
   grid-template-columns: 1fr 1fr;
   gap: 14px;
 }
-/* 이건 유리가 아니라 "찍어둔 화면"이라 불투명하게 둔다. */
+/* 이건 유리가 아니라 "실제 SSAFY 페이지를 찍어둔 것"이다. 그 페이지가
+   밝으므로 여기만 밝게 두고, 색도 토큰이 아니라 직접 적는다. */
 .demo-card {
   margin: 0;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: var(--r-md);
   box-shadow: var(--shadow);
-  background: var(--surface);
+  background: #ffffff;
   overflow: hidden;
 }
 .demo-bar {
@@ -456,8 +458,8 @@ svg {
   align-items: center;
   gap: 5px;
   padding: 9px 13px;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface-2);
+  border-bottom: 1px solid #e7e9ec;
+  background: #f2f3f5;
 }
 .demo-bar i {
   width: 7px;
@@ -469,7 +471,7 @@ svg {
   margin-left: 8px;
   font-size: 11px;
   letter-spacing: -0.01em;
-  color: var(--faint);
+  color: #8b9099;
 }
 .demo-body { padding: 16px 16px 15px; }
 .demo-caption {
@@ -477,13 +479,13 @@ svg {
   font-size: 11.5px;
   font-weight: 700;
   letter-spacing: 0.01em;
-  color: var(--faint);
+  color: #8b9099;
 }
 .demo-card figcaption {
   margin-top: 14px;
   font-size: 12.5px;
   line-height: 1.6;
-  color: var(--muted);
+  color: #5f636b;
 }
 
 .demo-stage { position: relative; }
@@ -568,7 +570,7 @@ svg {
   background: var(--line-2);
 }
 .steps li:first-child::before { display: none; }
-.steps li.done::before, .steps li.active::before { background: var(--ink); }
+.steps li.done::before, .steps li.active::before { background: #ffffff; }
 .steps li.active { color: var(--ink); }
 .steps li.done { color: var(--ink-2); }
 
@@ -589,8 +591,8 @@ svg {
   font-weight: 700;
   transition: background 0.2s;
 }
-.steps li.active .dot { background: var(--ink); }
-.steps li.done .dot { background: var(--ink); font-size: 0; }
+.steps li.active .dot { background: #ffffff; color: #0a0b0d; }
+.steps li.done .dot { background: #ffffff; font-size: 0; }
 /* 체크는 글꼴의 ✓ 대신 직접 그린다. 글꼴마다 크기와 높이가 제각각이라
    가운데 맞추기가 안 된다. */
 .steps li.done .dot::after {
@@ -598,7 +600,7 @@ svg {
   width: 5px;
   height: 9px;
   margin-top: -2px;
-  border: solid #fff;
+  border: solid #0a0b0d;
   border-width: 0 1.8px 1.8px 0;
   transform: rotate(45deg);
 }
@@ -648,7 +650,7 @@ svg {
   font-weight: 700;
   letter-spacing: -0.035em;
 }
-.panel-head .lead { color: var(--on-dark-2); }
+.panel-head .lead { color: var(--muted); }
 .panel h2 { margin: 36px 0 10px; font-size: 15.5px; font-weight: 700; }
 .panel h3 { margin: 0 0 5px; font-size: 14.5px; font-weight: 700; }
 .lead { margin: 0; color: var(--muted); font-size: 15px; }
@@ -701,9 +703,9 @@ svg {
   padding: 20px 22px;
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--surface);
 }
-.setting.static { background: rgba(255, 255, 255, 0.5); }
+.setting.static { background: var(--surface-2); }
 .setting-main { flex: 1; }
 .setting-main p { margin: 0; font-size: 13.5px; color: var(--muted); }
 
@@ -737,7 +739,7 @@ input[type="number"] {
   padding: 7px 8px;
   border: 1px solid var(--line-2);
   border-radius: 12px;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.06);
   color: inherit;
   font-size: 14px;
   font-family: inherit;
@@ -783,7 +785,7 @@ summary:focus-visible {
   height: 20px;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 1px 2px rgba(11, 14, 20, 0.28);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
   transition: transform 0.18s cubic-bezier(0.3, 0.8, 0.4, 1);
 }
 .switch input:checked + .track { background: var(--accent); }
@@ -819,7 +821,7 @@ summary:focus-visible {
   border: 1px solid var(--danger-line);
   border-radius: var(--r-lg);
   background: var(--danger-soft);
-  color: #8c261d;
+  color: #ffbdb8;
   font-size: 13.5px;
   line-height: 1.6;
 }
@@ -889,7 +891,7 @@ summary:focus-visible {
   gap: 16px;
   padding: 13px 18px;
   font-size: 14px;
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--surface-2);
 }
 .summary .row + .row { border-top: 1px solid var(--line); }
 .summary .row b { flex: none; font-weight: 600; color: var(--ink-2); }
@@ -939,35 +941,32 @@ summary:focus-visible {
 .btn .ico { transition: transform 0.18s cubic-bezier(0.3, 0.8, 0.4, 1); }
 .btn:not(:disabled):hover .ico { transform: translateX(2px); }
 
-/* 주 동작은 잉크색. 강조색을 버튼까지 쓰면 색이 두 군데서 소리를 낸다. */
+/* 주 동작은 흰 알약. 강조색을 버튼까지 쓰면 색이 두 군데서 소리를 낸다. */
 .btn.primary {
-  background: var(--ink);
-  color: #fff;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 1px 2px rgba(11, 14, 20, 0.2);
+  background: #ffffff;
+  color: #0a0b0d;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 24px -14px rgba(255, 255, 255, 0.4);
 }
-.btn.primary:not(:disabled):hover { background: #1b2130; }
-
-/* 어두운 히어로 위에서는 반대로 뒤집는다. */
-.btn.invert {
-  background: #fff;
-  color: var(--ink);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 24px -12px rgba(0, 0, 0, 0.7);
-}
-.btn.invert:not(:disabled):hover { background: #e9ecf2; }
+.btn.primary:not(:disabled):hover { background: #e4e7ec; }
 
 .btn.ghost {
-  background: var(--surface);
+  background: rgba(255, 255, 255, 0.06);
   border-color: var(--line-2);
   color: var(--ink-2);
 }
-.btn.ghost:not(:disabled):hover { background: var(--surface-2); border-color: #c8cdd7; }
-
-.btn.solid {
-  background: var(--ink);
-  color: #fff;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+.btn.ghost:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.24);
 }
-.btn.solid:not(:disabled):hover { background: #1b2130; }
+
+/* 단계 안의 주 동작도 같은 흰 알약. 두 개가 한 화면에 있어도 하는 일이
+   같으므로 모양이 달라질 이유가 없다. */
+.btn.solid {
+  background: #ffffff;
+  color: #0a0b0d;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+.btn.solid:not(:disabled):hover { background: #e4e7ec; }
 
 /* ── 반응형 ────────────────────────────────────────────────── */
 @media (max-width: 860px) {

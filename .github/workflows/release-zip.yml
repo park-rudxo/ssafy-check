@@ -34,8 +34,8 @@ jobs:
           VERSION: ${{ steps.v.outputs.version }}
         run: |
           set -euo pipefail
-          EXT_FILES="manifest.json background.js content.js content.css holidays.js
-                     mattermost.js build-target.js popup.html popup.js
+          EXT_FILES="manifest.json background.js content.js content.css debug.js
+                     holidays.js mattermost.js build-target.js popup.html popup.js
                      welcome.html welcome.css welcome.js"
 
           # 두 빌드는 같은 소스에서 나온다. 차이는 아래에서 주는 것뿐이다.
@@ -44,6 +44,35 @@ jobs:
             cp $EXT_FILES "$d/"
             cp -r icons "$d/"
           done
+
+          # 파일을 새로 추가하고 위 목록에 넣는 것을 잊으면, zip 은 멀쩡히
+          # 만들어지지만 설치할 때 크롬이 "파일을 읽을 수 없습니다"로 거부한다.
+          # (debug.js 가 실제로 그렇게 빠진 적이 있다.) manifest 가 가리키는
+          # 파일이 빌드에 다 들어갔는지 여기서 확인한다.
+          node -e '
+            const fs = require("fs");
+            let bad = 0;
+            for (const dir of ["dist/webstore", "dist/ssafy-check"]) {
+              const m = JSON.parse(fs.readFileSync(dir + "/manifest.json", "utf8"));
+              const refs = [m.background && m.background.service_worker];
+              for (const cs of m.content_scripts || []) refs.push(...(cs.js || []), ...(cs.css || []));
+              for (const p of Object.values(m.icons || {})) refs.push(p);
+              if (m.action && m.action.default_popup) refs.push(m.action.default_popup);
+              // 확장 페이지(popup/welcome)가 부르는 스크립트·스타일도 같이 본다.
+              // 이쪽은 크롬이 설치는 시켜주고 화면만 조용히 망가진다.
+              for (const f of fs.readdirSync(dir).filter((f) => f.endsWith(".html"))) {
+                const html = fs.readFileSync(dir + "/" + f, "utf8");
+                for (const [, p] of html.matchAll(/(?:src|href)="([^":]+)"/g)) refs.push(p);
+              }
+              for (const p of new Set(refs.filter(Boolean))) {
+                if (!fs.existsSync(dir + "/" + p)) {
+                  console.error(`::error::${dir} 에 ${p} 가 없습니다. EXT_FILES 에 추가하세요.`);
+                  bad++;
+                }
+              }
+            }
+            if (bad) process.exit(1);
+          '
 
           # ── 웹스토어 빌드에만 주는 차이 ──────────────────────────────
           # 1) 업데이트 UI 를 끈다. 크롬이 알아서 갱신하고, 업데이트.bat 이

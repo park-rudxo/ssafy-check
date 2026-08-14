@@ -124,8 +124,8 @@
       throw new Error("Mattermost에 로그인되어 있지 않아요. meeting.ssafy.com 에 로그인한 뒤 다시 눌러주세요.");
     }
     if (res.status === 403) {
-      // 이 계정에 웹훅 생성 권한이 없는 경우. 드문 일이 아니라서 부르는 쪽이
-      // 구분해 처리할 수 있게 표시를 달아준다.
+      // 이 계정에 웹훅/채널 생성 권한이 없는 경우. 드문 일이 아니라서 부르는
+      // 쪽이 구분해 처리할 수 있게 표시를 달아준다.
       const err = new Error("이 계정은 웹훅을 만들 권한이 없어요. 공용 웹훅으로 보냅니다.");
       err.blocked = true;
       throw err;
@@ -138,6 +138,45 @@
     }
   }
 
+  // 웹훅을 걸어둘 채널을 정한다.
+  //
+  // 웹훅은 DM 채널에 걸 수 없다 - Mattermost는 "이름이 있는 채널"에만 웹훅을
+  // 허용하고, DM으로 보내는 것은 만들 때가 아니라 보낼 때 payload의 @아이디로
+  // 한다. (공용 웹훅도 지금 그렇게 동작한다) DM 채널을 주면 403이 온다.
+  //
+  // 그래서 "집" 채널이 하나 필요한데, 여기를 전체 공개 채널로 두면 나중에
+  // @아이디가 빠졌을 때 팀 전원에게 알림이 가는 사고가 난다. 나만 있는 비공개
+  // 채널로 만들어 두면 그런 실수가 나도 나만 본다. 못 만드는 계정을 위해서만
+  // town-square로 물러난다.
+  const HOME_CHANNEL_NAME = "ssafy-attendance";
+
+  async function ensureHomeChannel(teamId) {
+    // 전에 만들어 둔 게 있으면 그대로 쓴다 (여러 번 눌러도 채널이 안 늘어난다).
+    try {
+      const found = await api(`/teams/${teamId}/channels/name/${HOME_CHANNEL_NAME}`);
+      if (found && found.id) return found.id;
+    } catch (e) {
+      /* 없으면 아래에서 만든다 */
+    }
+
+    try {
+      const made = await api("/channels", {
+        team_id: teamId,
+        name: HOME_CHANNEL_NAME,
+        display_name: "SSAFY 출석 알림",
+        type: "P", // 비공개
+        purpose: "SSAFY 출석 체크 알리미가 쓰는 통로입니다. 실제 알림은 개인 메시지로 옵니다.",
+      });
+      if (made && made.id) return made.id;
+    } catch (e) {
+      dlog("비공개 채널 생성 실패, town-square로 물러남", { error: String(e && e.message ? e.message : e) });
+    }
+
+    const ts = await api(`/teams/${teamId}/channels/name/town-square`);
+    if (!ts || !ts.id) throw new Error("웹훅을 걸어둘 채널을 찾지 못했어요.");
+    return ts.id;
+  }
+
   // 성공하면 { webhookUrl, channel } 을 돌려준다. 실패는 throw로 알린다.
   // 확장 페이지(팝업/설치 화면)에서 호출해야 한다 - 서비스 워커에는 이 호스트
   // 권한을 사용자 동작 없이 받을 방법이 없다.
@@ -145,19 +184,25 @@
     const me = await api("/users/me");
     if (!me || !me.id || !me.username) throw new Error("내 계정 정보를 읽지 못했어요.");
 
-    // "나와의 대화" 채널. 양쪽을 같은 사람으로 주면 된다. 이미 있으면 그대로
-    // 돌려주므로 여러 번 불러도 채널이 늘어나지 않는다.
-    const dm = await api("/channels/direct", [me.id, me.id]);
-    if (!dm || !dm.id) throw new Error("나와의 대화 채널을 만들지 못했어요.");
+    // 웹훅은 팀에 속한다. 여러 팀에 있으면 살아 있는 첫 팀을 쓴다 - 어느 팀에
+    // 걸리든 DM 전송에는 영향이 없다.
+    const teams = await api("/users/me/teams");
+    const team = (Array.isArray(teams) ? teams : []).find((t) => t && t.id && !t.delete_at);
+    if (!team) throw new Error("소속된 팀을 찾지 못했어요.");
+
+    const channelId = await ensureHomeChannel(team.id);
 
     const hook = await api("/hooks/incoming", {
-      channel_id: dm.id,
+      channel_id: channelId,
+      // 잠기면 payload의 @아이디로 DM을 보낼 수 없게 된다. 이 확장은 DM으로만
+      // 보내므로 반드시 열어둬야 한다.
+      channel_locked: false,
       display_name: HOOK_NAME,
       description: "SSAFY 출석 체크 알리미 확장이 자동으로 만든 웹훅",
     });
     if (!hook || !hook.id) throw new Error("웹훅을 만들지 못했어요.");
 
-    dlog("개인 웹훅 발급 완료", { username: me.username, channelId: dm.id, hookId: hook.id });
+    dlog("개인 웹훅 발급 완료", { username: me.username, team: team.name, channelId, hookId: hook.id });
     return { webhookUrl: hookUrl(hook.id), channel: "@" + me.username };
   }
 

@@ -2,8 +2,8 @@
  *
  * 참고한 결(애플 계열 의료기기 UI):
  *   1. 곡률을 크게. 칩과 버튼은 아예 알약 모양으로 둔다.
- *   2. 어두운 바탕 위에는 반투명 유리 카드를 띄운다. 불투명하게 덮지 않고
- *      뒤가 비치게 두어야 층이 생긴다.
+ *   2. 카드는 반투명 유리로. 불투명하게 덮지 않고 뒤가 비치게 두어야
+ *      밝은 톤 안에서도 층이 생긴다.
  *   3. 색은 상태에만 쓴다. 하늘색=정상, 빨강=경고. 나머지는 흑백.
  *   4. 숫자를 크게, 라벨은 작고 조용하게 그 아래에.
  *   5. 여백을 넉넉히, 경계는 1px 헤어라인으로.
@@ -21,13 +21,8 @@
   /* 흐린 글자도 본문 크기가 작으므로 대비를 너무 낮추지 않는다 (약 4.4:1) */
   --faint: #7c8087;
 
-  /* 어두운 히어로 */
-  --dark: #050506;
-  --on-dark: #f4f5f6;
-  --on-dark-2: #9ea1a8;
-
   /* 색은 하나만 쓴다. 하늘색이 "켜짐/정상", 빨강이 "경고"다.
-     밝은 곳과 어두운 곳에서 같은 색이 다르게 보이므로 두 단계로 나눠 둔다. */
+     글자용(진한 쪽)과 배경용(옅은 쪽)을 나눠 둔다. */
   --accent: #3ba3dc;
   --accent-vivid: #8fd3f7;
   --accent-ink: #0a6293;
@@ -132,25 +127,31 @@ svg {
 .landing > .bento { animation-delay: 0.1s; }
 .landing > .cta { animation-delay: 0.18s; }
 
-/* 어두운 바탕. 랜딩의 히어로와 설정 화면의 머리가 같은 것을 쓴다.
-   두 화면이 검정과 흰색으로 갈라져 보이지 않게 하려는 것이다. */
+/* 화면 맨 위. 랜딩의 히어로와 설정 화면의 머리가 같은 것을 쓴다.
+   두 화면이 다른 사이트처럼 보이지 않게 하려는 것이다.
+   흰 유리에 하늘빛을 옅게 얹어, 밝은 톤 안에서 층만 만든다. */
 .hero, .panel-head {
   position: relative;
   overflow: hidden;
   background:
-    radial-gradient(110% 120% at 50% -25%, #1c2028 0%, rgba(28, 32, 40, 0) 60%),
-    radial-gradient(65% 85% at 84% 112%, rgba(59, 163, 220, 0.3) 0%, rgba(59, 163, 220, 0) 62%),
-    var(--dark);
-  color: var(--on-dark);
+    radial-gradient(120% 130% at 50% -30%, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.5) 55%),
+    radial-gradient(70% 95% at 86% 118%, rgba(59, 163, 220, 0.22) 0%, rgba(59, 163, 220, 0) 66%),
+    rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(26px) saturate(1.5);
+  color: var(--ink);
 }
 .hero {
-  padding: 72px 56px 60px;
+  padding: 68px 56px 60px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
   border-radius: var(--r-xl);
   text-align: center;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 26px 54px -32px rgba(0, 0, 0, 0.7);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    0 1px 1px rgba(10, 11, 13, 0.03),
+    0 18px 40px -22px rgba(10, 11, 13, 0.22);
 }
 /* 유리 카드 뒤에 하늘빛을 하나 깔아둔다. 유리는 뒤에 비칠 것이 있어야
-   유리처럼 보인다. 검정 위에 얹기만 하면 그냥 회색 상자다. */
+   유리처럼 보인다. 균일한 바탕에 얹기만 하면 그냥 흰 상자다. */
 .hero::before {
   content: "";
   position: absolute;
@@ -160,19 +161,9 @@ svg {
   height: 340px;
   transform: translateX(-50%);
   pointer-events: none;
-  background: radial-gradient(50% 50% at 50% 50%, rgba(59, 163, 220, 0.36), rgba(59, 163, 220, 0) 72%);
+  background: radial-gradient(50% 50% at 50% 50%, rgba(59, 163, 220, 0.28), rgba(59, 163, 220, 0) 72%);
 }
 
-/* 넓은 그라데이션은 그냥 두면 띠(banding)가 보인다. 아주 옅은 노이즈를
-   덮어 띠를 지우고, 덤으로 화면이 평평해 보이지 않게 한다. */
-.hero::after, .panel-head::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.055;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-}
 .hero-inner { position: relative; z-index: 1; }
 
 .eyebrow {
@@ -181,11 +172,11 @@ svg {
   gap: 8px;
   margin: 0 0 26px;
   padding: 6px 14px 6px 7px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--line);
   border-radius: var(--r-pill);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(18px) saturate(1.4);
-  color: var(--on-dark-2);
+  color: var(--ink-2);
   font-size: 12.5px;
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -202,7 +193,7 @@ svg {
 .hero-sub {
   max-width: 30em;
   margin: 20px auto 0;
-  color: var(--on-dark-2);
+  color: var(--muted);
   font-size: 16px;
   line-height: 1.7;
 }
@@ -213,18 +204,19 @@ svg {
   gap: 14px;
   margin-top: 34px;
 }
-.hero-note { font-size: 12.5px; color: #74777e; }
+.hero-note { font-size: 12.5px; color: var(--faint); }
 
 /* ── 히어로 위의 유리 카드 ─────────────────────────────────── */
-/* 어두운 바탕을 불투명하게 덮지 않고 뒤가 비치게 둔다. 그래야 위에 뜬
-   것처럼 보인다. 내용은 확장이 실제로 알려주는 것과 같다. */
+/* 바탕을 불투명하게 덮지 않고 뒤가 비치게 둔다. 그래야 위에 뜬 것처럼
+   보인다. 내용은 확장이 실제로 알려주는 것과 같다. */
 .glass {
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.78);
   backdrop-filter: blur(26px) saturate(1.6);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.16),
-    0 18px 40px -22px rgba(0, 0, 0, 0.9);
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 1px 1px rgba(10, 11, 13, 0.04),
+    0 14px 30px -18px rgba(10, 11, 13, 0.28);
 }
 
 .preview-stack {
@@ -251,8 +243,8 @@ svg {
   height: 32px;
   flex: none;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--good-vivid);
+  background: var(--good-soft);
+  color: var(--good-ink);
 }
 .pc-ico svg { width: 17px; height: 17px; }
 .pc-name { font-size: 13.5px; font-weight: 600; }
@@ -260,7 +252,7 @@ svg {
   margin-left: auto;
   font-size: 13.5px;
   font-weight: 600;
-  color: var(--on-dark-2);
+  color: var(--muted);
 }
 
 .live-card {
@@ -272,7 +264,7 @@ svg {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.03em;
-  color: var(--on-dark-2);
+  color: var(--muted);
 }
 .lc-row {
   display: flex;
@@ -296,15 +288,15 @@ svg {
   height: 46px;
   flex: none;
   border-radius: 50%;
-  border: 1.5px solid rgba(74, 212, 141, 0.5);
-  background: radial-gradient(circle at 50% 50%, rgba(18, 160, 95, 0.4), rgba(18, 160, 95, 0.06));
-  color: var(--good-vivid);
+  border: 1.5px solid rgba(18, 160, 95, 0.35);
+  background: radial-gradient(circle at 50% 50%, rgba(74, 212, 141, 0.3), rgba(74, 212, 141, 0.08));
+  color: var(--good-ink);
   animation: breathe 3.2s ease-in-out infinite;
 }
 .lc-ring svg { width: 19px; height: 19px; }
 @keyframes breathe {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(74, 212, 141, 0.32); }
-  50% { box-shadow: 0 0 0 9px rgba(74, 212, 141, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(18, 160, 95, 0.26); }
+  50% { box-shadow: 0 0 0 9px rgba(18, 160, 95, 0); }
 }
 .lc-foot {
   display: flex;
@@ -312,7 +304,7 @@ svg {
   gap: 6px;
   margin-top: 16px;
   padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--line);
 }
 .chip {
   display: inline-flex;
@@ -320,12 +312,12 @@ svg {
   gap: 6px;
   padding: 5px 11px;
   border-radius: var(--r-pill);
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--on-dark-2);
+  background: var(--surface-2);
+  color: var(--muted);
   font-size: 11.5px;
   font-weight: 600;
 }
-.chip.on { color: var(--good-vivid); }
+.chip.on { background: var(--good-soft); color: var(--good-ink); }
 .chip.on::before {
   content: "";
   width: 6px;
@@ -334,7 +326,7 @@ svg {
   background: currentColor;
 }
 
-/* 상태 배지. 어두운 곳에서는 선명하게, 밝은 곳에서는 옅게. */
+/* 상태 배지. 알약 모양으로 두어 어디에 놓여도 같은 것으로 읽힌다. */
 .badge {
   padding: 4px 10px;
   border-radius: var(--r-pill);
@@ -347,7 +339,7 @@ svg {
 }
 .badge.soft { background: var(--accent-soft); color: var(--accent-ink); }
 /* 출석 시각(09:00·18:00)은 "이 안에 들어오면 정상"이라는 뜻이라 초록이다. */
-.pill-card .badge { background: var(--good-vivid); color: #05301d; }
+.pill-card .badge { background: var(--good-soft); color: var(--good-ink); }
 .rule .badge.soft { background: var(--good-soft); color: var(--good-ink); }
 .rule .k { color: var(--good); }
 
@@ -614,8 +606,8 @@ svg {
 .panel[hidden] { display: none; }
 
 .panel-head {
-  padding: 34px 44px 32px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  padding: 34px 44px 30px;
+  border-bottom: 1px solid var(--line);
 }
 .panel-head > * { position: relative; z-index: 1; }
 .panel-body { padding: 30px 44px 32px; }
@@ -628,7 +620,7 @@ svg {
   font-size: 11.5px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: var(--accent-vivid);
+  color: var(--accent-ink);
 }
 .tag {
   padding: 3px 9px;
@@ -636,11 +628,7 @@ svg {
   font-size: 11px;
   letter-spacing: 0;
 }
-.tag.req {
-  background: rgba(216, 54, 47, 0.22);
-  border: 1px solid rgba(255, 140, 133, 0.35);
-  color: #ff9d96;
-}
+.tag.req { background: var(--danger-soft); color: var(--danger); }
 
 .panel h1 {
   margin: 0 0 12px;
@@ -648,7 +636,7 @@ svg {
   font-weight: 700;
   letter-spacing: -0.035em;
 }
-.panel-head .lead { color: var(--on-dark-2); }
+.panel-head .lead { color: var(--muted); }
 .panel h2 { margin: 36px 0 10px; font-size: 15.5px; font-weight: 700; }
 .panel h3 { margin: 0 0 5px; font-size: 14.5px; font-weight: 700; }
 .lead { margin: 0; color: var(--muted); font-size: 15px; }
@@ -946,14 +934,6 @@ summary:focus-visible {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 1px 2px rgba(11, 14, 20, 0.2);
 }
 .btn.primary:not(:disabled):hover { background: #1b2130; }
-
-/* 어두운 히어로 위에서는 반대로 뒤집는다. */
-.btn.invert {
-  background: #fff;
-  color: var(--ink);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 24px -12px rgba(0, 0, 0, 0.7);
-}
-.btn.invert:not(:disabled):hover { background: #e9ecf2; }
 
 .btn.ghost {
   background: var(--surface);

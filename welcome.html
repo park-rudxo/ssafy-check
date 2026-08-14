@@ -17,7 +17,7 @@
 
     <!-- ── 1. Mattermost 연결 (필수) ──────────────────────────── -->
     <section class="panel" data-panel="1">
-      <h1>💬 Mattermost 로그인하여 시작하기 <span class="opt">필수</span></h1>
+      <h1>💬 Mattermost 연결 <span class="opt">필수</span></h1>
       <p class="lead">
         크롬 알림과 화면 강조는 <b>이 페이지를 열어놓고 있을 때만</b> 보입니다.
         자리를 비우거나 탭을 닫으면 아무 소용이 없고, 정작 놓치는 순간이 바로 그때예요.
@@ -25,13 +25,48 @@
         확장이 제 역할을 합니다. <b>설정 전에는 화면 강조도 켜지지 않습니다.</b>
       </p>
 
-      <a class="btn ghost" id="mm-open" href="https://meeting.ssafy.com/" target="_blank" rel="noreferrer">
-        🌐 Mattermost 열기 (로그인 확인)
-      </a>
-      <p class="hint">
-        아래 연결은 <b>로그인된 Mattermost 세션</b>을 씁니다. 로그인이 안 되어 있으면 실패하니,
-        위 버튼으로 로그인부터 확인하세요.
-      </p>
+      <!-- 데스크탑 앱으로 로그인해도 크롬은 그 로그인을 못 본다. 이걸 먼저
+           못 박아두지 않으면 "로그인했는데 안 된다"로 되돌아온다. -->
+      <div class="callout">
+        <span class="ico">⚠️</span>
+        <span>
+          <span class="t">데스크탑 앱 로그인은 인식되지 않습니다</span>
+          Mattermost <b>설치형 앱(데스크탑 앱)</b>에 로그인해도 크롬은 그 로그인 정보를 읽을 수 없어요.
+          반드시 <b>지금 이 크롬 브라우저에서 웹페이지(meeting.ssafy.com)로 로그인</b>해주세요.
+          <span class="sub">앱에서만 로그인한 상태로 아래 연결을 누르면 “로그인되어 있지 않아요”가 뜹니다.</span>
+        </span>
+      </div>
+
+      <div class="flow">
+        <div class="flow-step">
+          <span class="t">크롬에서 Mattermost 웹으로 로그인</span>
+          <p class="d">
+            새 탭이 열립니다. 이미 로그인되어 있으면 메시지 화면이 바로 보이고, 그러면 그대로 두고 돌아오면 됩니다.
+            로그인 화면이 보이면 <b>브라우저에서</b> 로그인까지 마쳐주세요.
+          </p>
+          <a class="btn ghost" id="mm-open" href="https://meeting.ssafy.com/" target="_blank" rel="noreferrer">
+            🌐 크롬에서 Mattermost 웹 열기
+          </a>
+        </div>
+
+        <div class="flow-step">
+          <span class="t">내 계정 연결하기</span>
+          <p class="d">
+            브라우저에 로그인된 상태를 그대로 써서, 나에게만 오는 알림 통로를 자동으로 만들어 둡니다.
+          </p>
+          <button class="btn test" id="mm-provision">🔗 내 계정 연결하기</button>
+          <div class="hint" id="mm-who"></div>
+        </div>
+
+        <div class="flow-step">
+          <span class="t">테스트 메시지로 확인</span>
+          <p class="d">
+            실제로 한 통 보내봅니다. Mattermost(폰이든 앱이든)에 도착했는지 눈으로 확인하세요.
+          </p>
+          <button class="btn test" id="mm-test">테스트 메시지 보내기</button>
+          <div class="status" id="mm-status"></div>
+        </div>
+      </div>
 
       <details class="how">
         <summary>무엇이 만들어지나요?</summary>
@@ -45,12 +80,6 @@
           <b>오타로 알림을 못 받거나 남에게 보내는 일이 없습니다.</b>
         </p>
       </details>
-
-      <button class="btn test" id="mm-provision">🔗 내 계정 연결하기</button>
-      <div class="hint" id="mm-who"></div>
-
-      <button class="btn test" id="mm-test">테스트 메시지 보내기</button>
-      <div class="status" id="mm-status"></div>
 
       <div class="note">
         보내는 내용: <b>입실 완료</b>, <b>퇴실 완료</b>, 그리고 <b>미체크 경고</b>(08:50~ / 18:00~).

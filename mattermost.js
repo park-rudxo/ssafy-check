@@ -134,7 +134,13 @@
       dlog("오류 본문", { path, body: detail.slice(0, 300) });
     }
     if (res.status === 401) {
-      throw new Error("Mattermost에 로그인되어 있지 않아요. meeting.ssafy.com 에 로그인한 뒤 다시 눌러주세요.");
+      // 데스크탑 앱은 자기 저장소에 로그인 정보를 들고 있어서, 앱에 로그인해도
+      // 크롬에는 쿠키가 생기지 않는다. 여기서 앱 얘기를 빼놓으면 "로그인했는데
+      // 왜 안 되냐"로 돌아온다.
+      throw new Error(
+        "Mattermost에 로그인되어 있지 않아요. 데스크탑 앱 로그인은 인식되지 않습니다 — " +
+          "이 크롬 브라우저에서 meeting.ssafy.com 웹페이지로 로그인한 뒤 다시 눌러주세요."
+      );
     }
     if (res.status === 403) {
       // 이 계정에 웹훅/채널 생성 권한이 없는 경우. 드문 일이 아니라서 부르는

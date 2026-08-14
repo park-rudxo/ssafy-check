@@ -11,96 +11,96 @@
        먼저 보여준 뒤 설정으로 넘긴다. -->
   <main class="page">
     <section class="landing" data-panel="0">
+      <!-- 히어로만 어둡게 깔아 화면 전체의 대비를 만든다. 아래 내용은 밝은
+           카드로 두어, 눈이 어디부터 읽어야 할지 헷갈리지 않게 한다. -->
       <header class="hero">
-        <p class="eyebrow">
-          <img src="icons/icon48.png" alt="" width="20" height="20" />
-          SSAFY 출석 체크 알리미
-        </p>
-        <h1>입실·퇴실 체크,<br />놓치기 전에 알려드립니다</h1>
-        <p class="hero-sub">
-          출석 페이지에서 버튼을 강조하고, 화면을 보고 있지 않아도
-          크롬 알림과 Mattermost 메시지로 알려줍니다.
-        </p>
-        <div class="hero-actions">
-          <button class="btn primary lg" id="start">
-            설정 시작하기
-            <svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
-          </button>
-          <span class="hero-note">1분이면 끝납니다</span>
+        <div class="hero-inner">
+          <p class="eyebrow">
+            <img src="icons/icon48.png" alt="" width="18" height="18" />
+            SSAFY 출석 체크 알리미
+          </p>
+          <h1>입실·퇴실 체크,<br />놓치기 전에 알려드립니다</h1>
+          <p class="hero-sub">
+            출석 페이지에서 버튼을 강조하고, 화면을 보고 있지 않아도
+            크롬 알림과 Mattermost 메시지로 알려줍니다.
+          </p>
+          <div class="hero-actions">
+            <button class="btn invert lg" id="start">
+              설정 시작하기
+              <svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+            </button>
+            <span class="hero-note">1분이면 끝납니다</span>
+          </div>
         </div>
       </header>
 
-      <div class="rules">
-        <div class="rule">
+      <!-- 크기가 다른 칸을 한 판에 섞어, 중요한 것이 더 큰 자리를 차지하게 한다. -->
+      <div class="bento">
+        <article class="cell rule">
           <span class="k">입실</span>
-          <span class="v">09:00 이전</span>
+          <span class="v">09:00<span class="u">이전</span></span>
           <span class="d">08:59까지 눌러야 정상 출석</span>
-        </div>
-        <div class="rule">
+        </article>
+        <article class="cell rule">
           <span class="k">퇴실</span>
-          <span class="v">18:00 이후</span>
+          <span class="v">18:00<span class="u">이후</span></span>
           <span class="d">18시 전 기록만 있으면 조퇴 처리</span>
-        </div>
+        </article>
+
+        <article class="cell showcase">
+          <div class="cell-head">
+            <h2>SSAFY 페이지에서는 이렇게 보입니다</h2>
+            <p>버튼 위에 테두리와 남은 시간이 따라붙습니다. 클릭은 그대로 됩니다.</p>
+          </div>
+          <div class="demo">
+            <figure class="demo-card">
+              <div class="demo-bar"><i></i><i></i><i></i><span>edu.ssafy.com</span></div>
+              <div class="demo-body">
+                <p class="demo-caption">아직 안 눌렀을 때</p>
+                <div class="demo-stage">
+                  <span class="ov-label danger">🚨 입실 체크! 09:00 마감 (12분 30초 남음)</span>
+                  <div class="ov-box danger"><span class="fake-btn">입실하기</span></div>
+                </div>
+                <figcaption>빨간 테두리가 깜빡이며 남은 시간을 초 단위로 알려줍니다.</figcaption>
+              </div>
+            </figure>
+
+            <figure class="demo-card">
+              <div class="demo-bar"><i></i><i></i><i></i><span>edu.ssafy.com</span></div>
+              <div class="demo-body">
+                <p class="demo-caption">아직 기다려야 할 때</p>
+                <div class="demo-stage">
+                  <span class="ov-label warn">⏳ 퇴실은 18:00 이후에 (2시간 5분 남음)</span>
+                  <div class="ov-box warn"><span class="fake-btn">퇴실하기</span></div>
+                </div>
+                <figcaption>주황 점선은 “아직 누르지 말고 기다리라”는 뜻입니다.</figcaption>
+              </div>
+            </figure>
+          </div>
+        </article>
+
+        <article class="cell feature">
+          <span class="feature-ico">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="13" rx="2" /><path d="M8 20h8M12 17v3" /></svg>
+          </span>
+          <h3>화면 강조</h3>
+          <p>SSAFY 페이지를 열어두면 체크 버튼에 테두리와 남은 시간이 따라붙습니다.</p>
+        </article>
+        <article class="cell feature">
+          <span class="feature-ico">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 6-2 7-2 7h16s-2-1-2-7Z" /><path d="M10.3 20a2 2 0 0 0 3.4 0" /></svg>
+          </span>
+          <h3>크롬 알림</h3>
+          <p>입실 10분 전(08:50)과 퇴실 10분 전(17:50)에 데스크톱 알림이 뜹니다.</p>
+        </article>
+        <article class="cell feature">
+          <span class="feature-ico">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5" /><path d="M11 18.5h2" /></svg>
+          </span>
+          <h3>Mattermost 푸시</h3>
+          <p>자리를 비웠을 때가 진짜 위험합니다. 폰으로 오는 알림이 마지막 안전장치예요.</p>
+        </article>
       </div>
-
-      <section class="block">
-        <h2 class="block-title">세 가지 방법으로 챙겨드립니다</h2>
-        <div class="features">
-          <article class="feature">
-            <span class="feature-ico">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="13" rx="2" /><path d="M8 20h8M12 17v3" /></svg>
-            </span>
-            <h3>화면 강조</h3>
-            <p>SSAFY 페이지를 열어두면 체크 버튼에 테두리와 남은 시간이 따라붙습니다.</p>
-          </article>
-          <article class="feature">
-            <span class="feature-ico">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 6-2 7-2 7h16s-2-1-2-7Z" /><path d="M10.3 20a2 2 0 0 0 3.4 0" /></svg>
-            </span>
-            <h3>크롬 알림</h3>
-            <p>입실 10분 전(08:50)과 퇴실 10분 전(17:50)에 데스크톱 알림이 뜹니다.</p>
-          </article>
-          <article class="feature">
-            <span class="feature-ico">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5" /><path d="M11 18.5h2" /></svg>
-            </span>
-            <h3>Mattermost 푸시</h3>
-            <p>자리를 비웠을 때가 진짜 위험합니다. 폰으로 오는 알림이 마지막 안전장치예요.</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="block">
-        <h2 class="block-title">SSAFY 페이지에서는 이렇게 보입니다</h2>
-        <div class="demo">
-          <figure class="demo-card">
-            <div class="demo-bar"><i></i><i></i><i></i><span>edu.ssafy.com</span></div>
-            <div class="demo-body">
-              <p class="demo-caption">아직 안 눌렀을 때</p>
-              <div class="demo-stage">
-                <span class="ov-label danger">🚨 입실 체크! 09:00 마감 (12분 30초 남음)</span>
-                <div class="ov-box danger"><span class="fake-btn">입실하기</span></div>
-              </div>
-              <figcaption>빨간 테두리가 깜빡이며 남은 시간을 초 단위로 알려줍니다.</figcaption>
-            </div>
-          </figure>
-
-          <figure class="demo-card">
-            <div class="demo-bar"><i></i><i></i><i></i><span>edu.ssafy.com</span></div>
-            <div class="demo-body">
-              <p class="demo-caption">아직 기다려야 할 때</p>
-              <div class="demo-stage">
-                <span class="ov-label warn">⏳ 퇴실은 18:00 이후에 (2시간 5분 남음)</span>
-                <div class="ov-box warn"><span class="fake-btn">퇴실하기</span></div>
-              </div>
-              <figcaption>주황 점선은 “아직 누르지 말고 기다리라”는 뜻입니다.</figcaption>
-            </div>
-          </figure>
-        </div>
-        <p class="note">
-          테두리는 버튼 클릭을 막지 않습니다. 평소처럼 그대로 누르시면 됩니다.
-        </p>
-      </section>
 
       <div class="cta">
         <div>

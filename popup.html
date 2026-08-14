@@ -196,6 +196,44 @@
       line-height: 1.5;
     }
 
+    /* 진단 로그 */
+    .dbg {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #eee;
+    }
+    .dbg-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+      font-weight: 700;
+      color: #444;
+    }
+    .dbg-header .arrow { transition: transform 0.2s; }
+    .dbg-header.open .arrow { transform: rotate(90deg); }
+    .dbg-body { margin-top: 12px; display: none; }
+    .dbg-body.open { display: block; }
+    #dbg-text {
+      width: 100%;
+      box-sizing: border-box;
+      height: 160px;
+      padding: 8px;
+      border: 1px solid #bbb;
+      border-radius: 6px;
+      font-family: Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      white-space: pre;
+      overflow: auto;
+      background: #fafafa;
+      color: #333;
+    }
+    .dbg-row { display: flex; gap: 6px; margin-top: 8px; }
+    .dbg-row button { font-size: 12px; padding: 7px; }
+    .btn-clear { background: #90a4ae; }
+
     /* Mattermost 알림 */
     .mm {
       margin-top: 12px;
@@ -421,6 +459,24 @@
     <div id="update-status" class="update-status"></div>
   </div>
 
+  <div class="dbg">
+    <div class="dbg-header" id="dbg-header">
+      <span>🐞 진단 로그</span>
+      <span class="arrow">▶</span>
+    </div>
+    <div class="dbg-body" id="dbg-body">
+      <div class="time-hint">
+        메시지가 안 올 때 <b>어디서 멈췄는지</b> 여기 남습니다. 복사해서 그대로 보내주세요.
+      </div>
+      <textarea id="dbg-text" readonly></textarea>
+      <div class="dbg-row">
+        <button id="dbg-copy">📋 복사</button>
+        <button id="dbg-clear" class="btn-clear">지우기</button>
+      </div>
+      <div class="time-hint" id="dbg-status"></div>
+    </div>
+  </div>
+
   <div class="dev">
     <div class="dev-header" id="dev-header">
       <span>🛠️ 개발자 모드</span>
@@ -471,6 +527,7 @@
 
   <script src="build-target.js"></script>
   <script src="holidays.js"></script>
+  <script src="debug.js"></script>
   <script src="mattermost.js"></script>
   <script src="popup.js"></script>
 </body>

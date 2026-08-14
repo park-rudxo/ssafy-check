@@ -16,6 +16,13 @@ try {
 }
 const IS_WEBSTORE = self.BUILD_TARGET === "webstore";
 
+// 진단 로그. 없어도 기능은 다 돌아가야 하므로 조용한 no-op 으로 물러난다.
+try {
+  importScripts("debug.js");
+} catch (e) {
+  self.SsafyDebug = { log() {}, read: () => Promise.resolve([]), clear: () => Promise.resolve() };
+}
+
 // 공휴일 판정은 content.js/popup.js와 같은 규칙을 써야 하므로 공용 모듈을 불러온다.
 // 파일이 없으면 importScripts가 서비스워커를 통째로 죽이므로, 그 경우엔
 // 예전 동작(주말만 제외)으로 물러나 알림 기능 자체는 살려 둔다.
@@ -233,7 +240,10 @@ async function postToMattermost(text, cfg) {
   // DM은 Mattermost 기본 설정에서 폰 푸시가 오기 때문에 알림용으로도 가장
   // 확실하다.
   const target = SsafyMattermost.normalizeTarget(s.channel);
-  if (!target.ok) return { ok: false, error: target.error };
+  if (!target.ok) {
+    SsafyDebug.log("mm", "받을 곳이 올바르지 않아 보내지 않음", { channel: s.channel, error: target.error });
+    return { ok: false, error: target.error };
+  }
 
   // 내용은 최상위 text가 아니라 attachments 안에 넣는다. 첨부 카드 안의
   // author_name은 서버의 게시자 덮어쓰기 설정과 무관하게 항상 표시된다.
@@ -249,17 +259,30 @@ async function postToMattermost(text, cfg) {
     ],
   };
 
+  const url = SsafyMattermost.pickWebhookUrl(s);
+  const via = url === SsafyMattermost.WEBHOOK_URL ? "공용" : "개인";
+  SsafyDebug.log("mm", "전송 시도", { to: target.value, via, text: text.slice(0, 60) });
+
   try {
-    const res = await fetch(SsafyMattermost.pickWebhookUrl(s), {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (res.ok) return { ok: true };
-    return { ok: false, error: `Mattermost 응답 오류 (${res.status})` };
+    if (res.ok) {
+      SsafyDebug.log("mm", "전송 성공", { to: target.value, via });
+      return { ok: true };
+    }
+    // 본문에 실패 이유가 들어 있다(없는 아이디, 권한 없음, 요청 과다 등).
+    // 이걸 버리면 사용자에게는 "안 왔다"만 남아 원인을 좁힐 수 없다.
+    const body = await res.text().catch(() => "");
+    SsafyDebug.log("mm", "전송 실패", { status: res.status, via, body: body.slice(0, 300) });
+    return { ok: false, error: `Mattermost 응답 오류 (${res.status}) ${body.slice(0, 200)}` };
   } catch (e) {
     // host_permissions가 없으면 여기서 CORS 오류로 떨어진다.
-    return { ok: false, error: String(e && e.message ? e.message : e) };
+    const msg = String(e && e.message ? e.message : e);
+    SsafyDebug.log("mm", "전송 예외", { via, error: msg });
+    return { ok: false, error: msg };
   }
 }
 
@@ -304,6 +327,8 @@ async function handleAttendanceRecorded(msg) {
   const minutes = Number(msg.minutes);
   if (!Number.isFinite(minutes)) return { ok: false };
 
+  SsafyDebug.log("보고", "버튼 클릭 도착", { kind, minutes: hhmm(minutes) });
+
   const a = await getAttendance();
   a.date = todayStr();
   if (kind === "checkin") {
@@ -322,18 +347,22 @@ async function handleAttendanceRecorded(msg) {
 // 위젯에서 읽어낸 시각)이지만 같은 열쇠로 중복을 막기 때문에, 두 경로가
 // 모두 발동해도 하루에 한 번만 간다.
 async function notifyAttendanceDone(kind, minutes) {
+  // 여기서 걸러진 이유가 곧 "왜 메시지가 안 왔는지"의 답이라, 걸러질 때마다
+  // 그 이유를 남긴다. 조건 하나하나가 조용한 실패의 후보다.
+  const skip = (why) => SsafyDebug.log("done", `${kind} 알림 건너뜀`, { why, minutes });
+
   const s = await getMattermost();
-  if (!s.enabled) return;
+  if (!s.enabled) return skip("Mattermost 연동이 꺼져 있음");
   // 받는 사람이 없으면 보내지 않는다. markSentOnce보다 먼저 확인해서,
   // 설정을 고친 뒤 그날 안에 다시 보낼 수 있게 한다.
-  if (!SsafyMattermost.isValidTarget(s.channel)) return;
-  if (kind === "checkin" && !s.notifyCheckin) return;
-  if (kind === "checkout" && !s.notifyCheckout) return;
+  if (!SsafyMattermost.isValidTarget(s.channel)) return skip(`받을 곳이 올바르지 않음 (${s.channel})`);
+  if (kind === "checkin" && !s.notifyCheckin) return skip("입실 알림이 꺼져 있음");
+  if (kind === "checkout" && !s.notifyCheckout) return skip("퇴실 알림이 꺼져 있음");
   // 18시 이전 퇴실 기록은 아직 정상 퇴실이 아니라 "완료"로 알리지 않는다.
-  if (kind === "checkout" && minutes < CHECK_OUT_MIN) return;
+  if (kind === "checkout" && minutes < CHECK_OUT_MIN) return skip("18시 이전 퇴실이라 완료로 보지 않음");
   // 열쇠의 "click-"은 클릭 감지만 이 알림을 보내던 시절의 흔적이다. 이름을
   // 바꾸면 이미 저장된 오늘치 기록과 어긋나 그날 알림이 한 번 더 가므로 둔다.
-  if (!(await markSentOnce(`click-${kind}`))) return;
+  if (!(await markSentOnce(`click-${kind}`))) return skip("오늘 이미 보냄");
 
   const text =
     kind === "checkin"
@@ -347,6 +376,11 @@ async function handleAttendanceObserved(msg) {
   const ci = numOrNull(msg.checkinMin);
   const co = numOrNull(msg.checkoutMin);
   const a = await getAttendance();
+  SsafyDebug.log("보고", "위젯 관찰 도착", {
+    입실: ci == null ? "없음" : hhmm(ci),
+    퇴실: co == null ? "없음" : hhmm(co),
+    바뀜: !(a.pageCheckinMin === ci && a.pageCheckoutMin === co),
+  });
   if (a.pageCheckinMin === ci && a.pageCheckoutMin === co) return { ok: true };
   a.date = todayStr();
   a.pageCheckinMin = ci;
@@ -365,13 +399,22 @@ async function handleAttendanceObserved(msg) {
 
 // 미체크 경고는 일부러 매번 보낸다(점점 촘촘해지는 리마인더라 중복이 아님).
 async function handleMattermostWarning(totalMin) {
-  if (await isDayOff()) return; // 주말·공휴일·개인 휴무일에는 경고하지 않는다
+  const skip = (why) => SsafyDebug.log("경고", `${hhmm(totalMin)} 경고 건너뜀`, { why });
+
+  if (await isDayOff()) return skip("쉬는 날"); // 주말·공휴일·개인 휴무일에는 경고하지 않는다
 
   const s = await getMattermost();
-  if (!s.enabled || !s.notifyMissing) return;
-  if (!SsafyMattermost.isValidTarget(s.channel)) return;
+  if (!s.enabled) return skip("Mattermost 연동이 꺼져 있음");
+  if (!s.notifyMissing) return skip("미체크 경고가 꺼져 있음");
+  if (!SsafyMattermost.isValidTarget(s.channel)) return skip(`받을 곳이 올바르지 않음 (${s.channel})`);
 
   const a = await getAttendance();
+  SsafyDebug.log("경고", `${hhmm(totalMin)} 판단 시작`, {
+    클릭입실: a.checkinMin == null ? "없음" : hhmm(a.checkinMin),
+    클릭퇴실: a.checkoutMin == null ? "없음" : hhmm(a.checkoutMin),
+    위젯입실: a.pageCheckinMin == null ? "없음" : hhmm(a.pageCheckinMin),
+    위젯퇴실: a.pageCheckoutMin == null ? "없음" : hhmm(a.pageCheckoutMin),
+  });
   if (MM_WARN_CHECKIN_MINS.includes(totalMin)) {
     // 위젯에 입실 시각이 찍혀 있으면 폰으로 눌렀더라도 입실한 것이다.
     if (a.pageCheckinMin != null || a.checkinMin != null) return;

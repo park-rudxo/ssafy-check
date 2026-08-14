@@ -91,7 +91,13 @@
   // 쿠키로 인증된 요청은 CSRF 검사를 받는다. X-Requested-With 헤더가 있으면
   // 브라우저가 보낸 XHR로 인정되어 통과한다. (서버가 엄격 모드를 켠 경우에는
   // 이것만으로 부족한데, 그때는 아래에서 응답 코드를 그대로 알려준다)
+  // 이 모듈은 debug.js 없이도 (테스트 등) 돌아야 하므로 없으면 조용히 넘긴다.
+  function dlog(...args) {
+    if (root.SsafyDebug && root.SsafyDebug.log) root.SsafyDebug.log("api", ...args);
+  }
+
   async function api(path, body) {
+    dlog("요청", { path, method: body === undefined ? "GET" : "POST" });
     let res;
     try {
       res = await fetch(API_BASE + path, {
@@ -104,7 +110,15 @@
         body: body === undefined ? undefined : JSON.stringify(body),
       });
     } catch (e) {
+      dlog("연결 실패", { path, error: String(e && e.message ? e.message : e) });
       throw new Error("Mattermost에 연결하지 못했어요. 잠시 후 다시 시도해주세요.");
+    }
+    dlog("응답", { path, status: res.status });
+    if (!res.ok) {
+      // 본문에 서버가 준 이유가 들어 있다. 특히 CSRF 거절과 권한 거절을
+      // 구분하려면 이게 있어야 한다 - 둘 다 403으로 보이기 때문이다.
+      const detail = await res.clone().text().catch(() => "");
+      dlog("오류 본문", { path, body: detail.slice(0, 300) });
     }
     if (res.status === 401) {
       throw new Error("Mattermost에 로그인되어 있지 않아요. meeting.ssafy.com 에 로그인한 뒤 다시 눌러주세요.");
@@ -143,6 +157,7 @@
     });
     if (!hook || !hook.id) throw new Error("웹훅을 만들지 못했어요.");
 
+    dlog("개인 웹훅 발급 완료", { username: me.username, channelId: dm.id, hookId: hook.id });
     return { webhookUrl: hookUrl(hook.id), channel: "@" + me.username };
   }
 

@@ -329,6 +329,36 @@
     });
   }
 
+  // ── 진단 로그 ──────────────────────────────────────────────────────
+  // 이 확장의 실패는 거의 다 "아무 일도 안 일어남"으로 보인다. 어디서 멈췄는지
+  // 사용자가 통째로 복사해 보낼 수 있어야 원인을 좁힐 수 있다.
+  function renderDebugLog() {
+    SsafyDebug.read().then((lines) => {
+      const el = document.getElementById("dbg-text");
+      el.value = lines.length ? lines.join("\n") : "아직 기록이 없습니다.";
+      // 최근 것이 아래에 쌓이므로 열자마자 끝을 보여준다.
+      el.scrollTop = el.scrollHeight;
+    });
+  }
+
+  function setDebugStatus(text) {
+    document.getElementById("dbg-status").textContent = text;
+  }
+
+  function copyDebugLog() {
+    const el = document.getElementById("dbg-text");
+    navigator.clipboard.writeText(el.value).then(
+      () => setDebugStatus("복사했어요. 그대로 붙여넣어 보내주세요."),
+      () => {
+        // 클립보드 권한이 막힌 환경에서는 직접 고르게 해준다.
+        el.removeAttribute("readonly");
+        el.select();
+        el.setAttribute("readonly", "");
+        setDebugStatus("복사가 막혀 있어요. Ctrl+C 를 눌러주세요.");
+      }
+    );
+  }
+
   // ── 이벤트 바인딩 ──────────────────────────────────────────────────
   function bind() {
     // 섹션 펼치기/접기
@@ -455,6 +485,22 @@
       document.getElementById(id).addEventListener("change", (e) => {
         mm[key] = e.target.checked;
         saveMattermost();
+      });
+    });
+
+    // 진단 로그
+    const dbgHeader = document.getElementById("dbg-header");
+    const dbgBody = document.getElementById("dbg-body");
+    dbgHeader.addEventListener("click", () => {
+      const open = dbgBody.classList.toggle("open");
+      dbgHeader.classList.toggle("open", open);
+      if (open) renderDebugLog();
+    });
+    document.getElementById("dbg-copy").addEventListener("click", copyDebugLog);
+    document.getElementById("dbg-clear").addEventListener("click", () => {
+      SsafyDebug.clear().then(() => {
+        renderDebugLog();
+        setDebugStatus("지웠어요. 이제 다시 재현해보세요.");
       });
     });
 

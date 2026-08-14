@@ -446,6 +446,11 @@
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
 
+  // debug.js 가 없어도 (로드 실패 등) 컨텐트 스크립트가 죽지 않게 감싼다.
+  function dlog(...args) {
+    if (typeof SsafyDebug !== "undefined" && SsafyDebug.log) SsafyDebug.log("page", ...args);
+  }
+
   // 백그라운드로 보고를 보낸다. 실패하면 잠깐 뒤에 몇 번 더 시도한다.
   //
   // MV3 서비스 워커는 할 일이 없으면 잠든다. 잠든 워커에 sendMessage를 하면
@@ -457,7 +462,8 @@
   // 아침에 워커가 잠들어 있을 확률이 개발용 설치본보다 훨씬 높다.
   function sendToBackground(payload, tries) {
     const left = tries == null ? 3 : tries;
-    const retry = () => {
+    const retry = (e) => {
+      dlog("보고 실패", { type: payload.type, 남은시도: left - 1, error: String(e && e.message ? e.message : e) });
       if (left > 1) setTimeout(() => sendToBackground(payload, left - 1), 1000);
     };
     try {
@@ -466,12 +472,13 @@
       if (p && typeof p.catch === "function") p.catch(retry);
     } catch (e) {
       /* 확장 컨텍스트가 무효화된 경우 */
-      retry();
+      retry(e);
     }
   }
 
   function recordClick(key) {
     const minutes = nowMinutes();
+    dlog("버튼 클릭 감지", { kind: key === CHECKIN_KEY ? "checkin" : "checkout", minutes });
     try {
       localStorage.setItem(key, JSON.stringify({ date: todayStr(), minutes, at: Date.now() }));
     } catch (e) {
@@ -518,6 +525,7 @@
     const sig = `${todayStr()}|${checkinMin}|${checkoutMin}`;
     if (sig === lastReportedObserved) return; // 값이 바뀔 때만 보낸다
     lastReportedObserved = sig;
+    dlog("위젯에서 읽음", { checkinMin, checkoutMin });
     sendToBackground({
       type: "attendanceObserved",
       date: todayStr(),

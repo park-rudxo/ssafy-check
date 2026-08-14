@@ -8,17 +8,33 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": ["alarms", "notifications", "storage"],
-  "host_permissions": ["https://api.github.com/*"],
-  "optional_host_permissions": ["https://meeting.ssafy.com/*"],
+  "permissions": [
+    "alarms",
+    "notifications",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://api.github.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://meeting.ssafy.com/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://edu.ssafy.com/*"],
-      "js": ["holidays.js", "content.js"],
-      "css": ["content.css"],
+      "matches": [
+        "https://edu.ssafy.com/*"
+      ],
+      "js": [
+        "debug.js",
+        "holidays.js",
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
       "run_at": "document_idle"
     }
   ],

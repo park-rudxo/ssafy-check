@@ -208,6 +208,8 @@
     if (mm.enabled && !SsafyMattermost.isValidTarget(mm.channel)) {
       setMmStatus("받을 곳에 @내아이디를 입력해야 메시지가 갑니다.", "err");
     }
+
+    renderSetupGate();
   }
 
   function saveMattermost() {
@@ -327,6 +329,30 @@
         });
       });
     });
+  }
+
+  // ── 설정 필수 게이트 ───────────────────────────────────────────────
+  // 설정을 마치기 전에는 화면 강조도 켜지지 않으므로(content.js), 팝업에서도
+  // 그 사실을 분명히 알리고 곧장 설정으로 데려간다.
+  function renderSetupGate() {
+    const done = SsafyMattermost.isConfigured(mm);
+    document.getElementById("setup-gate").hidden = done;
+    // 설정이 안 됐으면 Mattermost 섹션을 펼쳐둔다. 접혀 있으면 "설정하라"는
+    // 말만 보이고 설정할 곳은 안 보인다.
+    if (!done) openMattermostSection();
+  }
+
+  function openMattermostSection() {
+    document.getElementById("mm-body").classList.add("open");
+    document.getElementById("mm-header").classList.add("open");
+  }
+
+  function openMattermostHome() {
+    try {
+      chrome.tabs.create({ url: SsafyMattermost.HOME_URL });
+    } catch (e) {
+      /* 탭을 열 수 없는 상황이면 무시 */
+    }
   }
 
   // ── 진단 로그 ──────────────────────────────────────────────────────
@@ -487,6 +513,9 @@
         saveMattermost();
       });
     });
+
+    document.getElementById("setup-gate-go").addEventListener("click", openMattermostSection);
+    document.getElementById("mm-open").addEventListener("click", openMattermostHome);
 
     // 진단 로그
     const dbgHeader = document.getElementById("dbg-header");

@@ -22,6 +22,12 @@
 
   // ── 단계 이동 ──────────────────────────────────────────────────────
   function show(n) {
+    // 3단계(Mattermost)를 마치기 전에는 완료 화면으로 갈 수 없다.
+    // 이 판정을 여기 한 곳에 두면 어느 경로로 오든 같은 규칙이 적용된다.
+    if (n === 4 && !SsafyMattermost.isConfigured(mm)) {
+      step = 3;
+      n = 3;
+    }
     step = n;
     document.querySelectorAll("[data-panel]").forEach((p) => {
       p.hidden = Number(p.dataset.panel) !== n;
@@ -129,10 +135,11 @@
     const channel = target.value;
 
     if (!channel) {
-      // 아무것도 안 적었으면 "나중에 할게요"와 같은 뜻으로 보고 넘어간다.
-      // 이 단계는 선택이므로 빈 칸 때문에 설치를 막지는 않는다.
+      // 이 단계는 이제 건너뛸 수 없어서 "다음"에서 이미 막힌다. 여기까지
+      // 오는 경로는 없지만, 빈 값으로 enabled 를 켜두면 설정이 끝난 것처럼
+      // 보이므로 확실히 꺼둔다.
       mm = { ...mm, enabled: false, channel: "" };
-      return save({ mattermost: mm }).then(() => ({ ok: true, skipped: true }));
+      return save({ mattermost: mm }).then(() => ({ ok: false, error: SsafyMattermost.ERR_EMPTY }));
     }
 
     // 적기는 했는데 아이디 형식이 아니면 이 단계에 머물러 고치게 한다.
@@ -207,7 +214,8 @@
 
     let mmText = "<span class='off'>연동 안 함</span>";
     if (mm.enabled) {
-      mmText = `<span class='on'>켜짐</span> — ${escapeHtml(mm.channel)} 개인 메시지`;
+      const via = SsafyMattermost.hasPersonalWebhook(mm) ? "내 전용 통로" : "공용 통로";
+      mmText = `<span class='on'>켜짐</span> — ${escapeHtml(mm.channel)} 개인 메시지 (${via})`;
     } else if (mm.channel) {
       // 아이디는 적었는데 못 켠 경우 (권한 미허용, 형식 오류)
       mmText = "<span class='off'>안 켜짐</span> — 팝업에서 다시 시도할 수 있어요";
@@ -240,14 +248,16 @@
     $("mm-provision").addEventListener("click", provisionMattermost);
     $("mm-test").addEventListener("click", testMattermost);
     $("mm-next").addEventListener("click", () => {
-      // 아무것도 안 적었으면 연동 없이 넘어간다 (이 단계는 선택).
+      // 이 단계는 건너뛸 수 없다. 여기를 마치지 않으면 화면 강조까지 꺼진
+      // 채로 설치가 끝나서, 사용자는 "설치했는데 아무 일도 안 일어난다"만
+      // 겪게 된다. 비워두고 넘어갈 길을 아예 두지 않는 편이 낫다.
       if (!$("mm-channel").value.trim()) {
-        applyMattermost().then(() => show(4));
+        setStatus("이 단계는 건너뛸 수 없어요. 위의 자동 설정을 눌러주세요.", "err");
         return;
       }
-      // 아이디를 적었으면 저장·권한·테스트 전송까지 하고, 실제로 보내진
-      // 뒤에만 넘어간다. 아이디가 틀렸는지 확인할 방법은 도착 여부뿐이라
-      // 확인을 미루면 정작 필요한 날 아무것도 안 오는 걸로 알게 된다.
+      // 저장·권한·테스트 전송까지 하고, 실제로 보내진 뒤에만 넘어간다.
+      // 아이디가 틀렸는지 확인할 방법은 도착 여부뿐이라, 확인을 미루면
+      // 정작 필요한 날 아무것도 안 오는 걸로 알게 된다.
       testMattermost().then((sent) => {
         if (sent) show(4);
       });

@@ -107,10 +107,19 @@
 
     <!-- ── 3. Mattermost ──────────────────────────────────────── -->
     <section class="panel" data-panel="3" hidden>
-      <h1>💬 Mattermost로 받기 <span class="opt">선택</span></h1>
+      <h1>💬 Mattermost로 받기 <span class="opt">필수</span></h1>
       <p class="lead">
-        크롬 알림은 자리를 비우거나 크롬을 닫으면 못 봅니다.
-        Mattermost로 보내면 <b>폰으로 푸시</b>가 와서 퇴실을 놓치기 어려워요.
+        크롬 알림과 화면 강조는 <b>이 페이지를 열어놓고 있을 때만</b> 보입니다.
+        자리를 비우거나 탭을 닫으면 아무 소용이 없고, 정작 놓치는 순간이 바로 그때예요.
+        Mattermost로 보내면 <b>폰으로 푸시</b>가 오기 때문에, 이 단계를 마쳐야
+        확장이 제 역할을 합니다. <b>설정 전에는 화면 강조도 켜지지 않습니다.</b>
+      </p>
+
+      <a class="btn ghost" id="mm-open" href="https://meeting.ssafy.com/" target="_blank" rel="noreferrer">
+        🌐 Mattermost 열기 (로그인 확인)
+      </a>
+      <p class="hint">
+        아래 자동 설정은 <b>로그인된 Mattermost 세션</b>을 씁니다. 로그인이 안 되어 있으면 실패해요.
       </p>
 
       <details class="how">
@@ -153,7 +162,6 @@
       <div class="actions">
         <button class="btn ghost" data-go="2">← 이전</button>
         <span class="spacer"></span>
-        <button class="btn ghost" data-go="4">나중에 할게요</button>
         <button class="btn primary" id="mm-next">다음 →</button>
       </div>
     </section>

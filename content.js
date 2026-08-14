@@ -28,11 +28,16 @@
   const DAYOFF_DEFAULTS = { offDays: [], workDays: [] };
   let dayOff = { ...DAYOFF_DEFAULTS };
 
+  // Mattermost 연동 설정. 이 확장은 설정을 마치기 전까지 아무것도 강조하지
+  // 않으므로(아래 update 참고), 페이지에서도 이 값을 알아야 한다.
+  let mm = null;
+
   function loadDevSettings(cb) {
     try {
-      chrome.storage.local.get(["ssafyDev", "dayOff"], (data) => {
+      chrome.storage.local.get(["ssafyDev", "dayOff", "mattermost"], (data) => {
         dev = { ...DEV_DEFAULTS, ...(data && data.ssafyDev) };
         dayOff = { ...DAYOFF_DEFAULTS, ...(data && data.dayOff) };
+        mm = (data && data.mattermost) || null;
         if (cb) cb();
       });
     } catch (e) {
@@ -43,9 +48,10 @@
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
-      if (!changes.ssafyDev && !changes.dayOff) return;
+      if (!changes.ssafyDev && !changes.dayOff && !changes.mattermost) return;
       if (changes.ssafyDev) dev = { ...DEV_DEFAULTS, ...changes.ssafyDev.newValue };
       if (changes.dayOff) dayOff = { ...DAYOFF_DEFAULTS, ...changes.dayOff.newValue };
+      if (changes.mattermost) mm = changes.mattermost.newValue || null;
       update();
     });
   } catch (e) {
@@ -122,6 +128,17 @@
       return day >= 1 && day <= 5;
     }
     return !SsafyHolidays.dayInfo(now, dayOff).off;
+  }
+
+  // 설정이 끝났는지. mattermost.js 는 컨텐트 스크립트로 주입하지 않으므로
+  // (페이지에 웹훅 주소를 노출할 이유가 없다) 같은 규칙을 여기서 최소한으로만
+  // 다시 쓴다. 규칙이 바뀌면 mattermost.js 의 isConfigured 와 함께 고쳐야 한다.
+  const USERNAME_RE = /^[a-z][a-z0-9._-]{2,21}$/;
+
+  function isMattermostConfigured() {
+    if (!mm || !mm.enabled) return false;
+    const id = String(mm.channel == null ? "" : mm.channel).trim().replace(/^@+/, "").toLowerCase();
+    return USERNAME_RE.test(id);
   }
 
   // 우리가 그려 넣은 요소(배너·강조 박스·라벨)인지 확인한다.
@@ -613,6 +630,22 @@
       removeBox("checkin");
       removeBox("checkout");
       hideBanner();
+      return;
+    }
+
+    // ── Mattermost 설정이 끝나기 전에는 강조를 켜지 않는다 ──────────────
+    // 화면 강조는 이 페이지를 열어놓고 있을 때만 보인다. 자리를 비우거나
+    // 탭을 닫으면 아무 소용이 없고, 정작 놓치는 상황이 바로 그때다. 폰으로
+    // 푸시가 오는 Mattermost 경로까지 갖춰야 이 확장이 제 역할을 하므로,
+    // 설정을 마칠 때까지는 강조 대신 설정하라는 안내만 띄운다.
+    //
+    // mm 이 null 인 동안은 아직 저장소를 읽지 못한 것이므로 아무 판단도 하지
+    // 않는다. 여기서 "설정 안 됨"으로 단정하면 페이지를 열 때마다 안내가
+    // 잠깐씩 번쩍인다.
+    if (mm && !isMattermostConfigured()) {
+      removeBox("checkin");
+      removeBox("checkout");
+      showBanner("⚙️ 설정을 마쳐야 동작합니다. 확장 아이콘을 눌러 Mattermost 알림을 설정하세요.", "warn");
       return;
     }
 

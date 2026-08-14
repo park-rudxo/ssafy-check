@@ -137,3 +137,26 @@ test("개인 웹훅이 없거나 모양이 이상하면 공용 웹훅으로 물�
   assert.equal(MM.pickWebhookUrl(undefined), MM.WEBHOOK_URL);
   assert.equal(MM.pickWebhookUrl({}), MM.WEBHOOK_URL);
 });
+
+// ── 필수 설정 판정 ────────────────────────────────────────────────────
+// 팝업·설치 화면·페이지 배너가 모두 이 판정 하나로 움직인다. 여기가 느슨해지면
+// 설정이 안 끝났는데 끝난 것처럼 보이고, 사용자는 "설치했는데 아무 일도
+// 안 일어난다"만 겪게 된다.
+test("설정 완료는 연동이 켜져 있고 받을 곳이 유효할 때만", () => {
+  assert.equal(MM.isConfigured({ enabled: true, channel: "@hong.gildong" }), true);
+  assert.equal(MM.isConfigured({ enabled: true, channel: "hong.gildong" }), true);
+
+  assert.equal(MM.isConfigured({ enabled: false, channel: "@hong.gildong" }), false, "꺼져 있으면 미완료");
+  assert.equal(MM.isConfigured({ enabled: true, channel: "" }), false, "받을 곳이 비면 미완료");
+  assert.equal(MM.isConfigured({ enabled: true, channel: "홍길동" }), false, "한글 이름은 미완료");
+  assert.equal(MM.isConfigured(null), false);
+  assert.equal(MM.isConfigured(undefined), false);
+  assert.equal(MM.isConfigured({}), false);
+});
+
+test("개인 웹훅을 쓰는지 구분한다 (안내 문구가 갈린다)", () => {
+  const own = "https://meeting.ssafy.com/hooks/aaaaaaaaaaaaaaaaaaaaaaaaaa";
+  assert.equal(MM.hasPersonalWebhook({ webhookUrl: own }), true);
+  assert.equal(MM.hasPersonalWebhook({ webhookUrl: "" }), false);
+  assert.equal(MM.hasPersonalWebhook({}), false);
+});

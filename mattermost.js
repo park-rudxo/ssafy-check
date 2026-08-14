@@ -63,6 +63,28 @@
     return normalizeTarget(value).ok;
   }
 
+  // ── 필수 설정 판정 ────────────────────────────────────────────────────
+  // Mattermost 연동은 이 확장의 곁다리가 아니라 본체다. 크롬 알림은 자리를
+  // 비우거나 크롬을 닫으면 못 보기 때문에, 폰으로 푸시가 오는 이 경로가 없으면
+  // 정작 필요한 순간에 아무것도 못 받는다. 그래서 설정을 마치기 전까지는
+  // 화면 강조도 켜지 않고 설정하라는 안내만 띄운다.
+  //
+  // 팝업·설치 화면·페이지 배너 세 곳이 모두 이 함수 하나로 판단해야 한다.
+  // 각자 조건을 따로 쓰면 한쪽만 "설정됨"으로 보이는 어긋남이 생긴다.
+  function isConfigured(cfg) {
+    return !!(cfg && cfg.enabled && isValidTarget(cfg.channel));
+  }
+
+  // 자동 설정이 통한 사람인지. 통하지 않아 공용 웹훅으로 물러난 사람과
+  // 구분해야 안내 문구를 맞게 띄울 수 있다.
+  function hasPersonalWebhook(cfg) {
+    return pickWebhookUrl(cfg) !== WEBHOOK_URL;
+  }
+
+  // 로그인 여부를 확인하러 보낼 곳. 자동 설정은 로그인된 세션을 쓰기 때문에,
+  // 로그인이 안 되어 있으면 무엇을 눌러도 401만 난다.
+  const HOME_URL = "https://meeting.ssafy.com/";
+
   // ── 개인 웹훅 자동 발급 ──────────────────────────────────────────────
   // 공용 웹훅 하나로 전원에게 DM을 보내면, 그 웹훅을 만든 사람이 모든 DM 방의
   // 참여자가 된다. 게다가 Mattermost는 보통 자기가 쓴 글에는 알림을 주지 않지만
@@ -209,8 +231,11 @@
   root.SsafyMattermost = {
     WEBHOOK_URL,
     WEBHOOK_ORIGIN,
+    HOME_URL,
     normalizeTarget,
     isValidTarget,
+    isConfigured,
+    hasPersonalWebhook,
     pickWebhookUrl,
     provisionPersonalWebhook,
     ERR_EMPTY,

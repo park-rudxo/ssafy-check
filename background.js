@@ -465,7 +465,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   // 설치/업데이트 직후에는 "현재 최신 Release"를 이미 본 것으로 기준을 잡아
   // 방금 설치한 사용자에게 곧바로 알림이 뜨지 않도록 한다.
   await setBaselineIfNeeded();
-  // 처음 설치했을 때만 튜토리얼 + 초기 설정 화면을 연다.
+  // 처음 설치했을 때만 랜딩 + 초기 설정 화면을 연다.
   // (업데이트 때마다 열면 성가시므로 install에서만)
   if (details && details.reason === "install") openWelcome();
 });

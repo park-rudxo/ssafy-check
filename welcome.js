@@ -1,4 +1,6 @@
-// 첫 설치 시 열리는 튜토리얼 + 초기 설정 마법사.
+// 첫 설치 시 열리는 랜딩(소개) + 초기 설정 마법사.
+// 0단계는 소개 화면, 1~3단계가 설정이다. 설정부터 들이밀면 무엇을 왜 하는지
+// 모른 채 버튼만 누르게 되므로, 소개를 먼저 보여주고 넘긴다.
 // 팝업과 같은 저장소 키(autoOpen, mattermost)를 쓰므로 여기서 설정한 값이
 // 그대로 팝업에도 반영된다.
 (() => {
@@ -16,25 +18,27 @@
 
   let autoOpen = { ...AUTO_OPEN_DEFAULTS };
   let mm = { ...MM_DEFAULTS };
-  let step = 1;
+  let step = 0;
 
   const $ = (id) => document.getElementById(id);
 
   // ── 단계 이동 ──────────────────────────────────────────────────────
   function show(n) {
-    // 1단계(Mattermost 연결)를 마치기 전에는 다음으로 갈 수 없다. 이 판정을
+    // 1단계(Mattermost 연결)를 마치기 전에는 그 뒤로 갈 수 없다. 이 판정을
     // 여기 한 곳에 두면 어느 경로로 오든 같은 규칙이 적용된다.
-    if (n !== 1 && !SsafyMattermost.isConfigured(mm)) n = 1;
+    // 소개(0)는 언제든 다시 볼 수 있어야 하므로 막지 않는다.
+    if (n > 1 && !SsafyMattermost.isConfigured(mm)) n = 1;
     step = n;
     document.querySelectorAll("[data-panel]").forEach((p) => {
       p.hidden = Number(p.dataset.panel) !== n;
     });
+    $("steps").hidden = n === 0;
     document.querySelectorAll("#steps li").forEach((li) => {
       const s = Number(li.dataset.step);
       li.classList.toggle("active", s === n);
       li.classList.toggle("done", s < n);
     });
-    if (n === 4) renderSummary();
+    if (n === 3) renderSummary();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -64,7 +68,7 @@
   // 이게 "내 계정에 제대로 붙었는지" 확인하는 유일한 창이다.
   function renderMattermost() {
     const done = SsafyMattermost.isConfigured(mm);
-    $("mm-provision").textContent = done ? "✅ 다시 연결하기" : "🔗 내 계정 연결하기";
+    $("mm-provision").textContent = done ? "다시 연결하기" : "내 계정 연결하기";
     $("mm-who").textContent = done ? `연결됨: ${mm.channel} — 내 전용 통로로 나에게만 갑니다.` : "";
     // 연결 전에는 보낼 곳이 없다. 눌러도 실패만 하는 버튼을 열어두면
     // 순서가 있다는 것 자체가 안 보인다.
@@ -116,7 +120,7 @@
         return save({ mattermost: mm }).then(() => {
           btn.disabled = false;
           renderMattermost();
-          setStatus(`✅ ${res.channel} 로 연결했어요. 이제 테스트 메시지를 보내보세요.`, "ok");
+          setStatus(`${res.channel} 로 연결했어요. 이제 테스트 메시지를 보내보세요.`, "ok");
         });
       })
       .catch((e) => {
@@ -150,7 +154,7 @@
           resolve(false);
           return;
         }
-        setStatus(`✅ ${mm.channel} 로 보냈어요. Mattermost에 도착했는지 확인하세요.`, "ok");
+        setStatus(`${mm.channel} 로 보냈어요. Mattermost에 도착했는지 확인하세요.`, "ok");
         resolve(true);
       });
     });
@@ -190,11 +194,13 @@
     document.querySelectorAll("[data-go]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const to = Number(btn.dataset.go);
-        // 알림 단계(3)를 떠날 때는 입력한 값을 반영하고 넘어간다.
-        if (step === 3) saveAutoOpen();
+        // 알림 단계(2)를 떠날 때는 입력한 값을 반영하고 넘어간다.
+        if (step === 2) saveAutoOpen();
         show(to);
       });
     });
+
+    $("start").addEventListener("click", () => show(1));
 
     $("ao-enabled").addEventListener("change", saveAutoOpen);
     $("ao-min").addEventListener("change", saveAutoOpen);
@@ -231,10 +237,10 @@
         $("ao-min").value = autoOpen.minutesBefore;
         $("ao-row").classList.toggle("off", !autoOpen.enabled);
         renderMattermost();
-        show(1);
+        show(0);
       });
     } catch (e) {
-      show(1);
+      show(0);
     }
   }
 

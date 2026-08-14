@@ -446,6 +446,30 @@
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
 
+  // 백그라운드로 보고를 보낸다. 실패하면 잠깐 뒤에 몇 번 더 시도한다.
+  //
+  // MV3 서비스 워커는 할 일이 없으면 잠든다. 잠든 워커에 sendMessage를 하면
+  // 크롬이 워커를 깨우는데, 그 사이에 페이지가 넘어가버리면 이 보고가 통째로
+  // 유실된다. 아침 입실이 정확히 그 상황이다 - 그날 첫 알람(08:50)보다 이른
+  // 시각이라 워커가 밤새 잠들어 있고, 입실 버튼을 누르면 화면이 갱신된다.
+  // 반면 퇴실은 17:50·18:00 알람이 막 워커를 깨워둔 뒤라 잘 도착한다.
+  // 웹스토어 빌드에는 15분마다 도는 릴리스 확인 알람마저 없어서(IS_WEBSTORE),
+  // 아침에 워커가 잠들어 있을 확률이 개발용 설치본보다 훨씬 높다.
+  function sendToBackground(payload, tries) {
+    const left = tries == null ? 3 : tries;
+    const retry = () => {
+      if (left > 1) setTimeout(() => sendToBackground(payload, left - 1), 1000);
+    };
+    try {
+      const p = chrome.runtime.sendMessage(payload);
+      // 서비스 워커가 없을 때 나는 "Receiving end does not exist"를 여기서 받는다.
+      if (p && typeof p.catch === "function") p.catch(retry);
+    } catch (e) {
+      /* 확장 컨텍스트가 무효화된 경우 */
+      retry();
+    }
+  }
+
   function recordClick(key) {
     const minutes = nowMinutes();
     try {
@@ -455,19 +479,14 @@
     }
     // 백그라운드에도 알린다. 서비스 워커는 페이지의 localStorage를 읽을 수
     // 없어서, 이 보고가 있어야 "아직 안 눌렀는지"를 판단해 Mattermost 경고를
-    // 보낼 수 있다.
-    try {
-      const p = chrome.runtime.sendMessage({
-        type: "attendanceRecorded",
-        kind: key === CHECKIN_KEY ? "checkin" : "checkout",
-        minutes,
-        date: todayStr(),
-      });
-      // 서비스 워커가 없을 때 나는 "Receiving end does not exist"를 무시한다.
-      if (p && typeof p.catch === "function") p.catch(() => {});
-    } catch (e) {
-      /* 확장 컨텍스트가 무효화된 경우 무시 */
-    }
+    // 보낼 수 있다. 같은 보고가 두 번 도착해도 백그라운드가 하루 한 번만
+    // 보내도록 막아두어서, 재시도가 메시지 중복으로 이어지지 않는다.
+    sendToBackground({
+      type: "attendanceRecorded",
+      kind: key === CHECKIN_KEY ? "checkin" : "checkout",
+      minutes,
+      date: todayStr(),
+    });
   }
 
   function readRecord(key) {
@@ -499,17 +518,12 @@
     const sig = `${todayStr()}|${checkinMin}|${checkoutMin}`;
     if (sig === lastReportedObserved) return; // 값이 바뀔 때만 보낸다
     lastReportedObserved = sig;
-    try {
-      const p = chrome.runtime.sendMessage({
-        type: "attendanceObserved",
-        date: todayStr(),
-        checkinMin,
-        checkoutMin,
-      });
-      if (p && typeof p.catch === "function") p.catch(() => {});
-    } catch (e) {
-      /* 확장 컨텍스트가 무효화된 경우 무시 */
-    }
+    sendToBackground({
+      type: "attendanceObserved",
+      date: todayStr(),
+      checkinMin,
+      checkoutMin,
+    });
   }
 
   // 퇴실 클릭 직후에는 위젯에 시각이 아직 안 찍혔을 수 있다(서버 반영 전).

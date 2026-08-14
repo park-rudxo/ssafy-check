@@ -4,7 +4,7 @@
  *   1. 곡률을 크게. 칩과 버튼은 아예 알약 모양으로 둔다.
  *   2. 어두운 바탕 위에는 반투명 유리 카드를 띄운다. 불투명하게 덮지 않고
  *      뒤가 비치게 두어야 층이 생긴다.
- *   3. 색은 상태에만 쓴다. 초록=정상, 빨강=경고. 나머지는 흑백.
+ *   3. 색은 상태에만 쓴다. 하늘색=정상, 빨강=경고. 나머지는 흑백.
  *   4. 숫자를 크게, 라벨은 작고 조용하게 그 아래에.
  *   5. 여백을 넉넉히, 경계는 1px 헤어라인으로.
  */
@@ -26,14 +26,17 @@
   --on-dark: #f4f5f6;
   --on-dark-2: #9ea1a8;
 
-  /* 색은 상태에만. 초록이 "정상", 빨강이 "경고"다. */
-  --accent: #12b76a;
-  --accent-vivid: #3fe08d;
-  --accent-ink: #067a48;
-  --accent-soft: #e6f8ef;
+  /* 색은 하나만 쓴다. 하늘색이 "켜짐/정상", 빨강이 "경고"다.
+     밝은 곳과 어두운 곳에서 같은 색이 다르게 보이므로 두 단계로 나눠 둔다. */
+  --accent: #3ba3dc;
+  --accent-vivid: #8fd3f7;
+  --accent-ink: #0a6293;
+  --accent-soft: #e9f4fb;
+  --accent-line: #c5e2f4;
 
-  --ok: #067a48;
-  --ok-soft: #e6f8ef;
+  /* 성공 상태도 같은 색으로. 색이 늘수록 화면이 소란스러워진다. */
+  --ok: #0a6293;
+  --ok-soft: #e9f4fb;
   --danger: #d8362f;
   --danger-soft: #fdf2f1;
   --danger-line: #f3c9c5;
@@ -54,10 +57,17 @@
 
 * { box-sizing: border-box; }
 
-/* 배경은 html에 건다. body에 걸면 내용이 짧을 때 아래쪽에 흰 띠가 남는다. */
+/* 배경은 html에 건다. body에 걸면 내용이 짧을 때 아래쪽에 흰 띠가 남는다.
+   밝은 쪽 카드도 반투명이라 바탕에 비칠 것이 있어야 유리로 보이므로,
+   아주 옅은 하늘빛 두 덩어리를 깔아둔다. 화면에 고정해 두면 길게
+   스크롤해도 빛의 위치가 흔들리지 않는다. */
 html {
   min-height: 100%;
-  background: var(--page);
+  background:
+    radial-gradient(58% 42% at 10% 2%, rgba(59, 163, 220, 0.17), rgba(59, 163, 220, 0) 70%),
+    radial-gradient(52% 42% at 94% 80%, rgba(59, 163, 220, 0.14), rgba(59, 163, 220, 0) 72%),
+    var(--page);
+  background-attachment: fixed;
 }
 
 body {
@@ -75,7 +85,7 @@ body {
   overflow-wrap: break-word;
 }
 
-::selection { background: rgba(18, 183, 106, 0.18); }
+::selection { background: rgba(59, 163, 220, 0.22); }
 
 .page {
   max-width: 860px;
@@ -122,14 +132,14 @@ svg {
   border-radius: var(--r-xl);
   background:
     radial-gradient(110% 120% at 50% -25%, #1c2028 0%, rgba(28, 32, 40, 0) 60%),
-    radial-gradient(65% 85% at 84% 112%, rgba(18, 183, 106, 0.28) 0%, rgba(18, 183, 106, 0) 62%),
+    radial-gradient(65% 85% at 84% 112%, rgba(59, 163, 220, 0.3) 0%, rgba(59, 163, 220, 0) 62%),
     var(--dark);
   color: var(--on-dark);
   text-align: center;
   overflow: hidden;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 26px 54px -32px rgba(0, 0, 0, 0.7);
 }
-/* 유리 카드 뒤에 초록 빛을 하나 깔아둔다. 유리는 뒤에 비칠 것이 있어야
+/* 유리 카드 뒤에 하늘빛을 하나 깔아둔다. 유리는 뒤에 비칠 것이 있어야
    유리처럼 보인다. 검정 위에 얹기만 하면 그냥 회색 상자다. */
 .hero::before {
   content: "";
@@ -140,7 +150,7 @@ svg {
   height: 340px;
   transform: translateX(-50%);
   pointer-events: none;
-  background: radial-gradient(50% 50% at 50% 50%, rgba(18, 183, 106, 0.34), rgba(18, 183, 106, 0) 72%);
+  background: radial-gradient(50% 50% at 50% 50%, rgba(59, 163, 220, 0.36), rgba(59, 163, 220, 0) 72%);
 }
 
 /* 넓은 그라데이션은 그냥 두면 띠(banding)가 보인다. 아주 옅은 노이즈를
@@ -267,7 +277,7 @@ svg {
   letter-spacing: -0.05em;
   line-height: 1.2;
 }
-/* 초록 링: 실제로 감시 중이라는 신호. 숨쉬듯 아주 느리게 움직인다. */
+/* 링: 실제로 지켜보고 있다는 신호. 숨쉬듯 아주 느리게 움직인다. */
 .lc-ring {
   display: flex;
   align-items: center;
@@ -276,15 +286,15 @@ svg {
   height: 46px;
   flex: none;
   border-radius: 50%;
-  border: 1.5px solid rgba(63, 224, 141, 0.5);
-  background: radial-gradient(circle at 50% 50%, rgba(18, 183, 106, 0.35), rgba(18, 183, 106, 0.05));
+  border: 1.5px solid rgba(143, 211, 247, 0.5);
+  background: radial-gradient(circle at 50% 50%, rgba(59, 163, 220, 0.38), rgba(59, 163, 220, 0.06));
   color: var(--accent-vivid);
   animation: breathe 3.2s ease-in-out infinite;
 }
 .lc-ring svg { width: 19px; height: 19px; }
 @keyframes breathe {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(63, 224, 141, 0.28); }
-  50% { box-shadow: 0 0 0 9px rgba(63, 224, 141, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(143, 211, 247, 0.3); }
+  50% { box-shadow: 0 0 0 9px rgba(143, 211, 247, 0); }
 }
 .lc-foot {
   display: flex;
@@ -319,7 +329,7 @@ svg {
   padding: 4px 10px;
   border-radius: var(--r-pill);
   background: var(--accent-vivid);
-  color: #05301d;
+  color: #05304a;
   font-size: 11.5px;
   font-weight: 700;
   letter-spacing: -0.01em;
@@ -334,12 +344,19 @@ svg {
   gap: 14px;
   margin-top: 14px;
 }
+/* 히어로의 유리와 같은 결. 밝은 쪽에서는 흰색을 살짝 비치게 둔다. */
+.cell, .panel, .cta {
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(24px) saturate(1.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 1px 1px rgba(10, 11, 13, 0.03),
+    0 10px 24px -14px rgba(10, 11, 13, 0.18);
+}
 .cell {
   padding: 24px 26px;
-  border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow);
 }
 .rule { grid-column: span 3; }
 .showcase { grid-column: span 6; }
@@ -390,7 +407,7 @@ svg {
   width: 36px;
   height: 36px;
   margin-bottom: 15px;
-  border-radius: 12px;
+  border-radius: 50%;
   background: var(--accent-soft);
   color: var(--accent-ink);
 }
@@ -411,6 +428,7 @@ svg {
   grid-template-columns: 1fr 1fr;
   gap: 14px;
 }
+/* 이건 유리가 아니라 "찍어둔 화면"이라 불투명하게 둔다. */
 .demo-card {
   margin: 0;
   border: 1px solid var(--line);
@@ -496,10 +514,7 @@ svg {
   gap: 24px;
   margin-top: 14px;
   padding: 24px 26px;
-  border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow);
 }
 .cta-title { margin: 0; font-size: 15.5px; font-weight: 700; letter-spacing: -0.02em; }
 .cta-sub { margin: 4px 0 0; font-size: 13.5px; color: var(--muted); }
@@ -579,10 +594,7 @@ svg {
   max-width: 720px;
   margin: 0 auto;
   padding: 40px 44px 34px;
-  border: 1px solid var(--line);
   border-radius: var(--r-xl);
-  background: var(--surface);
-  box-shadow: var(--shadow);
   animation: rise 0.32s cubic-bezier(0.22, 0.8, 0.3, 1);
 }
 .panel[hidden] { display: none; }
@@ -634,17 +646,17 @@ svg {
   counter-increment: flowstep;
   content: counter(flowstep);
   position: absolute;
-  left: -47px;
-  top: -1px;
+  left: -48px; /* 원의 가운데가 왼쪽 세로선 위에 오도록 */
+  top: -2px;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--ink-2);
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
   font-size: 12px;
   font-weight: 700;
 }
@@ -658,25 +670,30 @@ svg {
 .setting {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
+  gap: 16px;
   margin-top: 12px;
   padding: 20px 22px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: var(--surface);
+  border-radius: var(--r-lg);
+  background: rgba(255, 255, 255, 0.7);
 }
-.setting.static { background: var(--surface-2); }
+.setting.static { background: rgba(255, 255, 255, 0.5); }
+.setting-main { flex: 1; }
 .setting-main p { margin: 0; font-size: 13.5px; color: var(--muted); }
 
-.pill {
+/* 히어로 유리 카드의 원형 아이콘과 같은 모양 */
+.set-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
   flex: none;
-  padding: 5px 12px;
-  border-radius: var(--r-pill);
-  font-size: 11.5px;
-  font-weight: 700;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
 }
-.pill.on { background: var(--accent-soft); color: var(--accent-ink); }
+.set-ico svg { width: 17px; height: 17px; }
 
 .inline {
   display: flex;
@@ -704,7 +721,7 @@ input[type="number"] {
 }
 input[type="number"]:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(18, 183, 106, 0.18);
+  box-shadow: 0 0 0 3px rgba(59, 163, 220, 0.2);
   outline: none;
 }
 input:focus-visible,
@@ -751,7 +768,7 @@ summary:focus-visible {
 .note, .warn-note {
   margin: 20px 0 0;
   padding: 13px 16px;
-  border-radius: var(--r-md);
+  border-radius: var(--r-lg);
   font-size: 13.5px;
   line-height: 1.6;
 }
@@ -773,7 +790,7 @@ summary:focus-visible {
   margin-top: 24px;
   padding: 16px 18px;
   border: 1px solid var(--danger-line);
-  border-radius: var(--r-md);
+  border-radius: var(--r-lg);
   background: var(--danger-soft);
   color: #8c261d;
   font-size: 13.5px;
@@ -795,7 +812,7 @@ summary:focus-visible {
   margin-top: 24px;
   padding: 15px 18px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: var(--r-lg);
   background: var(--surface-2);
 }
 .how summary {
@@ -821,13 +838,13 @@ summary:focus-visible {
   line-height: 1.6;
 }
 .status:not(:empty) {
-  padding: 10px 13px;
+  padding: 11px 15px;
   border: 1px solid var(--line);
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   background: var(--surface-2);
   color: var(--ink-2);
 }
-.status.ok { border-color: #bfe8d3; background: var(--ok-soft); color: var(--ok); }
+.status.ok { border-color: var(--accent-line); background: var(--ok-soft); color: var(--ok); }
 .status.err { border-color: var(--danger-line); background: var(--danger-soft); color: var(--danger); }
 .status.busy { color: var(--muted); }
 
@@ -835,23 +852,31 @@ summary:focus-visible {
 .summary {
   margin-top: 22px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: var(--r-lg);
   overflow: hidden;
 }
 .summary .row {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   gap: 16px;
   padding: 13px 18px;
   font-size: 14px;
-  background: var(--surface);
+  background: rgba(255, 255, 255, 0.55);
 }
 .summary .row + .row { border-top: 1px solid var(--line); }
 .summary .row b { flex: none; font-weight: 600; color: var(--ink-2); }
 .summary .row span { text-align: right; color: var(--muted); }
-.summary .on { color: var(--ok); font-weight: 600; }
-.summary .off { color: var(--faint); font-weight: 600; }
+.summary .on, .summary .off {
+  display: inline-block;
+  margin-right: 2px;
+  padding: 2px 9px;
+  border-radius: var(--r-pill);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.summary .on { background: var(--accent-soft); color: var(--accent-ink); }
+.summary .off { background: var(--surface-2); color: var(--faint); }
 
 /* ── 버튼 ──────────────────────────────────────────────────── */
 .actions {

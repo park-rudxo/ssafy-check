@@ -53,6 +53,11 @@
       statusEl.className = "status idle";
       const what = info.reason === "personal" ? "등록해둔 휴무일" : info.label;
       statusEl.textContent = `😴 오늘은 ${what}입니다.` + tag;
+    } else if (minutes < 8 * 60) {
+      // 실제 입실 체크는 08:00부터 열리므로, 그 전에는 재촉하지 않는다.
+      const left = 8 * 60 - minutes;
+      statusEl.className = "status idle";
+      statusEl.textContent = `⏳ 입실은 08:00부터 가능 (${left}분 남음)` + tag;
     } else if (minutes < 9 * 60) {
       const left = 9 * 60 - minutes;
       statusEl.className = "status danger";

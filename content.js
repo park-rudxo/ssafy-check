@@ -1,11 +1,12 @@
 // SSAFY 출석 체크 알리미 - 콘텐츠 스크립트
 // 규칙:
-//  - 입실: 평일 09:00 이전에 반드시 입실 체크 (08:59까지)
+//  - 입실: 평일 08:00부터 열리며, 09:00 이전에 반드시 입실 체크 (08:59까지)
 //  - 퇴실: 반드시 18:00 이후에 퇴실 버튼 클릭 (그 전에 누르면 조퇴 처리 위험)
 
 (() => {
   "use strict";
 
+  const CHECK_IN_START_MIN = 8 * 60; // 08:00 - 실제 SSAFY 입실 체크는 이 시각부터 열린다.
   const CHECK_IN_DEADLINE_MIN = 9 * 60; // 09:00
   const CHECK_OUT_START_MIN = 18 * 60; // 18:00
   const BANNER_ID = "ssafy-alert-banner";
@@ -656,6 +657,22 @@
     // ── 입실 박스 ──
     if (!checkedIn) {
       const target = findCheckInButton() || findAttendanceWidget();
+      if (now < CHECK_IN_START_MIN) {
+        // 08:00 이전에는 SSAFY 쪽에서 실제로 입실 체크가 열리지 않으므로,
+        // 재촉하는 대신 언제부터 가능한지만 조용히 안내한다(퇴실 전 안내와
+        // 같은 스타일: 주황색, 배너 없음).
+        const left = secondsLeftText(CHECK_IN_START_MIN);
+        ensureBox("checkin", target, "warn", `⏳ 입실은 08:00부터 가능 (${left})`);
+        hideBanner();
+        removeBox("checkout");
+        countdown = {
+          boxId: "checkin",
+          targetMin: CHECK_IN_START_MIN,
+          renderLabel: (l) => `⏳ 입실은 08:00부터 가능 (${l})`,
+          renderBanner: null,
+        };
+        return;
+      }
       if (now < CHECK_IN_DEADLINE_MIN) {
         const left = secondsLeftText(CHECK_IN_DEADLINE_MIN);
         ensureBox("checkin", target, "danger", `🚨 입실 체크! 09:00 마감 (${left})`);

@@ -165,19 +165,19 @@
     const rows = [];
     rows.push([
       "화면 강조",
-      "<span class='on'>켜짐</span> — SSAFY 페이지에서 자동 동작",
+      "<span class='on'>켜짐</span> SSAFY 페이지에서 자동 동작",
     ]);
-    rows.push(["크롬 알림", "<span class='on'>켜짐</span> — 08:50 · 17:50"]);
+    rows.push(["크롬 알림", "<span class='on'>켜짐</span> 08:50 · 17:50"]);
     rows.push([
       "홈 자동 열기",
       autoOpen.enabled
-        ? `<span class='on'>켜짐</span> — ${autoOpen.minutesBefore}분 전`
+        ? `<span class='on'>켜짐</span> ${autoOpen.minutesBefore}분 전`
         : "<span class='off'>꺼짐</span>",
     ]);
 
     const mmText = SsafyMattermost.isConfigured(mm)
-      ? `<span class='on'>연결됨</span> — ${escapeHtml(mm.channel)} 개인 메시지 (내 전용 통로)`
-      : "<span class='off'>연결 안 됨</span> — 팝업에서 다시 시도할 수 있어요";
+      ? `<span class='on'>연결됨</span> ${escapeHtml(mm.channel)} 개인 메시지 (내 전용 통로)`
+      : "<span class='off'>연결 안 됨</span> 팝업에서 다시 시도할 수 있어요";
     rows.push(["Mattermost", mmText]);
 
     $("summary").innerHTML = rows

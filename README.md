@@ -202,7 +202,7 @@ Mattermost는 보통 **자기가 쓴 글에는 알림을 주지 않지만, 웹�
 
 **크롬 웹스토어에서 설치합니다.**
 
-👉 **크롬 웹스토어에서 설치하기** — ⚠️ **스토어 링크 추가 필요** (머지 전에 채울 것)
+👉 **[크롬 웹스토어에서 설치하기](https://chromewebstore.google.com/detail/ssafy-%EC%B6%9C%EC%84%9D-%EC%B2%B4%ED%81%AC-%EC%95%8C%EB%A6%AC%EB%AF%B8/ekbfbhpapmefoehkeegbbnbehflnhbnn)**
 
 설치가 끝나면 **시작하기 화면이 자동으로 열립니다.** 첫 화면인 **Mattermost 연결**은 건너뛸 수 없습니다 — 마치기 전에는 화면 강조도 켜지지 않습니다.
 

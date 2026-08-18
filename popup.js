@@ -240,18 +240,17 @@
   function ensureOriginPermission() {
     return new Promise((resolve) => {
       const pattern = SsafyMattermost.WEBHOOK_ORIGIN;
-      chrome.permissions.contains({ origins: [pattern] }, (has) => {
-        if (has) {
-          resolve({ ok: true });
+      // permissions.request 는 반드시 사용자 제스처(클릭) 안에서 불러야 한다.
+      // contains 로 먼저 확인하면 그 콜백은 이미 클릭과 끊긴 뒤라 요청이 조용히
+      // 거부되고, 사용자에게는 "눌러도 아무 일도 안 일어남" 으로만 보인다.
+      // 이미 허용돼 있으면 request 는 대화상자 없이 곧바로 true 를 돌려주므로,
+      // 미리 확인하지 말고 클릭에서 곧장 요청해야 한다.
+      chrome.permissions.request({ origins: [pattern] }, (granted) => {
+        if (chrome.runtime.lastError) {
+          resolve({ ok: false, error: chrome.runtime.lastError.message });
           return;
         }
-        chrome.permissions.request({ origins: [pattern] }, (granted) => {
-          if (chrome.runtime.lastError) {
-            resolve({ ok: false, error: chrome.runtime.lastError.message });
-            return;
-          }
-          resolve(granted ? { ok: true } : { ok: false, error: "권한을 허용해야 메시지를 보낼 수 있어요." });
-        });
+        resolve(granted ? { ok: true } : { ok: false, error: "권한을 허용해야 메시지를 보낼 수 있어요." });
       });
     });
   }
@@ -332,6 +331,15 @@
   function openMattermostSection() {
     document.getElementById("mm-body").classList.add("open");
     document.getElementById("mm-header").classList.add("open");
+  }
+
+  // 게이트의 버튼은 "설정할 곳으로 데려가는" 것이 목적이다. 그런데 설정이
+  // 안 된 상태에서는 renderSetupGate 가 이미 섹션을 펼쳐 두기 때문에, 펼치기만
+  // 해서는 눌러도 아무 일도 일어나지 않는 것처럼 보인다. 팝업이 길어서 그
+  // 섹션이 화면 밖에 있는 것이 진짜 문제이므로, 그 자리까지 스크롤해 준다.
+  function goToMattermostSection() {
+    openMattermostSection();
+    document.getElementById("mm-header").scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function openMattermostHome() {
@@ -478,7 +486,7 @@
       });
     });
 
-    document.getElementById("setup-gate-go").addEventListener("click", openMattermostSection);
+    document.getElementById("setup-gate-go").addEventListener("click", goToMattermostSection);
     document.getElementById("mm-open").addEventListener("click", openMattermostHome);
 
     // 진단 로그

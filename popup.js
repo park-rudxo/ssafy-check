@@ -337,9 +337,21 @@
   // 안 된 상태에서는 renderSetupGate 가 이미 섹션을 펼쳐 두기 때문에, 펼치기만
   // 해서는 눌러도 아무 일도 일어나지 않는 것처럼 보인다. 팝업이 길어서 그
   // 섹션이 화면 밖에 있는 것이 진짜 문제이므로, 그 자리까지 스크롤해 준다.
-  function goToMattermostSection() {
-    openMattermostSection();
-    document.getElementById("mm-header").scrollIntoView({ behavior: "smooth", block: "start" });
+  // 설정 안내의 버튼은 초기 설정 화면(welcome.html)을 다시 연다.
+  //
+  // 팝업 안에서 Mattermost 칸을 펼치는 것으로는 부족하다. 설정이 안 된
+  // 상태에서는 renderSetupGate 가 이미 펼쳐 두기 때문에 눌러도 변화가 없고,
+  // 좁은 팝업 안에서 연결을 끝내게 하는 것보다 원래의 설정 화면으로
+  // 데려가는 편이 낫다. 첫 설치 때 뜨는 그 화면을 실수로 닫으면 다시 여는
+  // 길이 없다는 문제도 이 버튼이 해결한다.
+  function openSetupPage() {
+    try {
+      chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
+      window.close();
+    } catch (e) {
+      /* 탭을 열 수 없는 상황이면 최소한 설정 칸이라도 펼쳐 준다 */
+      openMattermostSection();
+    }
   }
 
   function openMattermostHome() {
@@ -486,7 +498,7 @@
       });
     });
 
-    document.getElementById("setup-gate-go").addEventListener("click", goToMattermostSection);
+    document.getElementById("setup-gate-go").addEventListener("click", openSetupPage);
     document.getElementById("mm-open").addEventListener("click", openMattermostHome);
 
     // 진단 로그

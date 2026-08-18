@@ -334,6 +334,15 @@
     document.getElementById("mm-header").classList.add("open");
   }
 
+  // 게이트의 버튼은 "설정할 곳으로 데려가는" 것이 목적이다. 그런데 설정이
+  // 안 된 상태에서는 renderSetupGate 가 이미 섹션을 펼쳐 두기 때문에, 펼치기만
+  // 해서는 눌러도 아무 일도 일어나지 않는 것처럼 보인다. 팝업이 길어서 그
+  // 섹션이 화면 밖에 있는 것이 진짜 문제이므로, 그 자리까지 스크롤해 준다.
+  function goToMattermostSection() {
+    openMattermostSection();
+    document.getElementById("mm-header").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   function openMattermostHome() {
     try {
       chrome.tabs.create({ url: SsafyMattermost.HOME_URL });
@@ -478,7 +487,7 @@
       });
     });
 
-    document.getElementById("setup-gate-go").addEventListener("click", openMattermostSection);
+    document.getElementById("setup-gate-go").addEventListener("click", goToMattermostSection);
     document.getElementById("mm-open").addEventListener("click", openMattermostHome);
 
     // 진단 로그

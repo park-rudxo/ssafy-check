@@ -62,11 +62,18 @@ test("사용자명 규칙: 길이 경계 3~22자", () => {
   assert.equal(MM.isValidTarget("@" + "a".repeat(22)), true);
 });
 
-test("사용자명 규칙: 첫 글자는 문자여야 한다", () => {
-  for (const v of ["9team", "1a2", ".hong", "-hong", "_hong"]) {
-    assert.equal(MM.isValidTarget(v), false, `${v} 는 문자로 시작하지 않는다`);
-  }
+test("사용자명 규칙: 첫 글자는 문자 또는 숫자여야 한다 (기호 시작은 거절)", () => {
+  // SSAFY가 발급하는 계정 중에는 "9wxyz"처럼 숫자로 시작하는 실제 사용자명이
+  // 있어서, 이걸 거절하면 그 계정은 연동에 영원히 성공할 수 없다 (버튼이 계속
+  // 비활성화 상태로 남는 실제 버그였다). 그래서 숫자 시작은 허용하고, 실제로
+  // 존재할 수 없는 기호 시작만 거절한다.
+  for (const v of [".hong", "-hong", "_hong"]) {
+    assert.equal(MM.isValidTarget(v), false, `${v} 는 기호로 시작해 거절되어야 한다`);
+    }
   assert.equal(MM.isValidTarget("h9team"), true);
+  assert.equal(MM.isValidTarget("9team"), true);
+  assert.equal(MM.isValidTarget("1a2"), true);
+  assert.equal(MM.isValidTarget("9wxyz"), true);
 });
 
 test("사용자명 규칙: 숫자·문자와 . - _ 만 쓸 수 있다", () => {

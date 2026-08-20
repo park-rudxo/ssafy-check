@@ -2,11 +2,18 @@
 # 사용자가 git이나 개발 도구 없이 "다운로드 → 압축 해제 → 폴더 선택"만으로
 # 설치할 수 있게 하기 위함이다.
 #
-# 웹스토어 제출용 zip 은 요구 조건이 달라서 따로 만든다.
+# 웹스토어 제출용은 요구 조건이 달라서 따로 만든다.
 #  - manifest.json 이 zip 최상위에 있어야 한다 (설치용처럼 폴더로 감싸면 안 됨)
 #  - 업데이트.bat / update.ps1 은 스토어에서 쓰이지 않는 Windows 실행 스크립트라
 #    "확장 기능과 무관한 파일"로 심사에서 지적받을 수 있으므로 넣지 않는다
 # 이건 개발자만 쓰는 파일이라 Release 에 붙이지 않고 Actions 아티팩트로 올린다.
+#
+# 웹스토어 쪽은 zip 을 만들지 않고 폴더째 아티팩트로 올린다. GitHub 은
+# 아티팩트를 내려받을 때 항상 한 번 더 zip 으로 감싸므로, zip 을 올려두면
+# 받는 사람 손에는 zip 안에 zip 이 든 파일이 떨어진다. 그걸 그대로 웹스토어에
+# 올리면 "패키지에서 매니페스트를 찾을 수 없습니다" 로 거절당한다. 폴더를
+# 올리면 GitHub 이 감싸주는 그 zip 자체가 곧 제출용 파일이 되어, 받아서
+# 바로 올릴 수 있다. (실제로 두 번 거절당하고 나서 이렇게 바꿨다)
 # Release 에 zip 을 하나 더 붙이면 "어느 걸 받아야 하는지" 혼란이 다시 생기고,
 # update.ps1 이 Release 자산에서 zip 을 골라 받기 때문에 위험하다.
 name: Release ZIP 첨부
@@ -88,8 +95,9 @@ jobs:
             fs.writeFileSync(p, JSON.stringify(m, null, 2) + "\n");
           '
 
-          # 웹스토어는 manifest.json 이 zip 최상위에 있어야 한다.
-          ( cd dist/webstore && zip -r "$GITHUB_WORKSPACE/ssafy-check-v${VERSION}-webstore.zip" . )
+          # 웹스토어 제출용은 여기서 zip 으로 묶지 않는다. dist/webstore 를
+          # 폴더째 아티팩트로 올리고, GitHub 이 내려받을 때 감싸주는 zip 을
+          # 그대로 제출한다. (위 머리말 참고)
 
           # 설치용은 압축을 풀면 폴더 하나가 나오도록 감싸고, 그 폴더만
           # 더블클릭으로 갱신할 수 있게 업데이트 도구를 함께 넣는다.
@@ -98,8 +106,8 @@ jobs:
 
           # 웹스토어 빌드에 업데이트 도구나 GitHub 권한이 새어 들어가면
           # 심사에서 지적받으므로, 빌드가 조용히 잘못되지 않도록 여기서 막는다.
-          if unzip -l "ssafy-check-v${VERSION}-webstore.zip" | grep -qE '업데이트\.bat|update\.ps1'; then
-            echo "::error::웹스토어 zip 에 업데이트 도구가 들어갔습니다."; exit 1
+          if find dist/webstore -name '업데이트.bat' -o -name 'update.ps1' | grep -q .; then
+            echo "::error::웹스토어 빌드에 업데이트 도구가 들어갔습니다."; exit 1
           fi
           # optional_host_permissions 도 이름에 host_permissions 를 품고 있어
           # grep 으로는 구분되지 않는다. 키를 직접 확인한다.
@@ -116,14 +124,17 @@ jobs:
 
           echo "── 설치용 ──"
           unzip -l "ssafy-check-v${VERSION}.zip"
-          echo "── 웹스토어 제출용 ──"
-          unzip -l "ssafy-check-v${VERSION}-webstore.zip"
+          echo "── 웹스토어 제출용 (이 파일들이 내려받은 zip 의 최상위에 놓인다) ──"
+          ( cd dist/webstore && find . -type f | sort )
 
-      - name: 웹스토어 제출용 zip 을 아티팩트로 올리기
+      # path 에 zip 파일이 아니라 폴더를 준다. 이렇게 해야 내려받은 zip 의
+      # 최상위에 manifest.json 이 놓여 웹스토어에 그대로 올릴 수 있다.
+      # zip 파일을 주면 zip 안에 zip 이 들어가 거절당한다.
+      - name: 웹스토어 제출용 파일을 아티팩트로 올리기
         uses: actions/upload-artifact@v4
         with:
           name: webstore-v${{ steps.v.outputs.version }}
-          path: ssafy-check-v${{ steps.v.outputs.version }}-webstore.zip
+          path: dist/webstore/
           if-no-files-found: error
 
       - name: Release에 첨부

@@ -88,7 +88,7 @@ const SCENARIOS = [
   { name: "입실 전 08:30 - 입실 셀을 강조한다", dev: { checkedIn: "false", time: 8 * 60 + 30 }, expect: ".state" },
   { name: "입실 전 09:30 - 마감이 지나도 입실 셀을 강조한다", dev: { checkedIn: "false", time: 9 * 60 + 30 }, expect: ".state" },
   { name: "입실 완료 13:00 - 퇴실 버튼을 강조한다", dev: { checkedIn: "true", time: 13 * 60 }, expect: "#checkOut" },
-  { name: "입실 완료 18:30 - 퇴실 버튼을 강조한다", dev: { checkedIn: "true", time: 18 * 60 + 30 }, expect: "#checkOut" },
+  { name: "입실 완료 18:10 - 퇴실 버튼을 강조한다", dev: { checkedIn: "true", time: 18 * 60 + 10 }, expect: "#checkOut" },
 ];
 
 for (const scn of SCENARIOS) {
@@ -125,6 +125,40 @@ for (const scn of SCENARIOS) {
           near(box.w, t.w + PAD * 2) && near(box.h, t.h + PAD * 2),
         `박스가 대상(${scn.expect})을 감싸지 않는다. 박스=${JSON.stringify(box)} 대상=${JSON.stringify(t)}`
       );
+    } finally {
+      await page.close();
+    }
+  });
+}
+
+// 저녁에 개인적으로 들어왔을 때 뜨던 헛경고에 대한 회귀 테스트.
+// 18:30 을 넘기면 입실이든 퇴실이든 지금 눌러서 되돌릴 수 있는 게 없으므로,
+// 입실 여부와 무관하게 박스도 배너도 뜨지 않아야 한다. 수업과 상관없이 들어온
+// 화면을 붉게 덮는 헛경고만 남기 때문이다.
+const OFF_SCENARIOS = [
+  { name: "입실 전 18:30 - 경계 시각부터 꺼진다", dev: { checkedIn: "false", time: 18 * 60 + 30 } },
+  { name: "입실 전 19:00 - 아무것도 강조하지 않는다", dev: { checkedIn: "false", time: 19 * 60 } },
+  { name: "입실 완료 19:00 - 퇴실이 남아 있어도 강조하지 않는다", dev: { checkedIn: "true", time: 19 * 60 } },
+];
+
+for (const scn of OFF_SCENARIOS) {
+  test(scn.name, async () => {
+    const { page, pageErrors } = await openPage(scn.dev);
+    try {
+      // update 는 로드 직후 한 번 돌고 15초마다 반복한다. 그려질 참이면
+      // 이 사이에 이미 나타난다.
+      await page.waitForTimeout(2000);
+      const state = await page.evaluate(() => {
+        const banner = document.getElementById("ssafy-alert-banner");
+        return {
+          boxes: document.querySelectorAll(".ssafy-alert-box").length,
+          // 배너는 한 번 뜨면 요소가 남고 display 로만 감춰지므로 보이는지로 본다.
+          bannerVisible: !!banner && getComputedStyle(banner).display !== "none",
+        };
+      });
+      assert.equal(pageErrors.length, 0, "페이지 에러: " + pageErrors.join(" | "));
+      assert.equal(state.boxes, 0, "18:30 부터는 강조 박스가 없어야 한다");
+      assert.equal(state.bannerVisible, false, "18:30 부터는 경고 배너가 없어야 한다");
     } finally {
       await page.close();
     }

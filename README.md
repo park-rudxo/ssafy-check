@@ -167,10 +167,23 @@ Mattermost는 보통 **자기가 쓴 글에는 알림을 주지 않지만, 웹�
 1. `manifest.json` 의 `"version"` 을 올리고 커밋/머지
 2. GitHub → **Releases → Draft a new release** → 태그 지정 후 **Publish release**
    - 발행하면 `release-zip.yml` 이 돌아 **웹스토어 제출용 zip** 이 Actions 아티팩트로 올라갑니다
-3. Actions 에서 `webstore-vX.X.X` 아티팩트를 받아 **[크롬 웹스토어 개발자 대시보드](https://chrome.google.com/webstore/devconsole)** 에 업로드하고 심사를 제출합니다
-4. 심사가 통과되면 크롬이 사용자 확장을 알아서 갱신합니다
+3. Actions 의 해당 실행에서 `webstore-vX.X.X` 아티팩트를 내려받습니다
+4. **받은 파일의 압축을 풀고, 그 안에 있는 `ssafy-check-vX.X.X-webstore.zip` 을 올립니다** → **[크롬 웹스토어 개발자 대시보드](https://chrome.google.com/webstore/devconsole)** 에서 업로드하고 심사 제출
+5. 심사가 통과되면 크롬이 사용자 확장을 알아서 갱신합니다
 
-> Release 에 함께 붙는 **설치용 zip 은 지금 쓰이지 않습니다.** 웹스토어 이전에 압축 해제로 설치하던 때의 잔재입니다.
+> ⚠️ **4번에서 압축을 푸는 것을 빠뜨리기 쉽습니다.** GitHub 은 아티팩트를 내려받을 때 한 번 더 zip 으로 감싸기 때문에, 받은 파일을 그대로 올리면 zip 안에 zip 이 든 꼴이라 웹스토어가 거절합니다.
+>
+> ```
+> webstore-vX.X.X.zip            ← 받은 파일. 이걸 올리면 거절당함
+>   └ ssafy-check-vX.X.X-webstore.zip   ← 압축을 풀어 나오는 이걸 올려야 함
+>       ├ manifest.json          ← 웹스토어는 manifest 가 루트에 있어야 한다
+>       ├ background.js
+>       └ ...
+> ```
+>
+> `패키지에서 매니페스트를 찾을 수 없습니다` 오류가 나면 대개 이 경우입니다.
+
+> Release 에 함께 붙는 **설치용 zip(`ssafy-check-vX.X.X.zip`) 은 웹스토어에 올리면 안 됩니다.** `ssafy-check/` 폴더로 감싸여 있어 같은 오류가 납니다. 웹스토어 이전에 압축 해제로 설치하던 때의 잔재입니다.
 
 ### 🎓 첫 설치 랜딩 + 초기 설정 (welcome.html)
 설치를 마치면 **랜딩 페이지가 자동으로 열립니다.** 무엇을 해주는 확장인지 먼저 보여준 뒤(입실·퇴실 규칙, 세 가지 알림 방식, 화면 강조 미리보기) **설정 시작하기**로 마법사에 들어갑니다. 마법사의 첫 단계는 **Mattermost 연결**이고, 이 단계는 건너뛸 수 없습니다.

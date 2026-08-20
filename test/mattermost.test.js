@@ -69,7 +69,7 @@ test("사용자명 규칙: 첫 글자는 문자 또는 숫자여야 한다 (기�
   // 존재할 수 없는 기호 시작만 거절한다.
   for (const v of [".hong", "-hong", "_hong"]) {
     assert.equal(MM.isValidTarget(v), false, `${v} 는 기호로 시작해 거절되어야 한다`);
-    }
+  }
   assert.equal(MM.isValidTarget("h9team"), true);
   assert.equal(MM.isValidTarget("9team"), true);
   assert.equal(MM.isValidTarget("1a2"), true);

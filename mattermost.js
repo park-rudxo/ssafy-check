@@ -198,6 +198,28 @@
     return ts.id;
   }
 
+  // 이 확장이 전에 만들어 둔 내 웹훅을 찾는다. 없거나 목록을 못 읽으면 null 을
+  // 돌려주고, 부르는 쪽은 새로 만든다 - 재사용은 어디까지나 덤이라, 목록 조회가
+  // 막힌 계정에서 연결 자체가 실패하면 안 된다.
+  //
+  // 남이 만든 웹훅이나 사람이 손으로 만든 웹훅을 낚아채면 안 되므로, 셋이 모두
+  // 맞을 때만 내 것으로 인정한다: 만든 사람이 나, 이름이 이 확장의 것, 채널이
+  // 방금 정한 그 채널.
+  async function findMyHook(teamId, channelId, myId) {
+    try {
+      const list = await api(`/hooks/incoming?team_id=${encodeURIComponent(teamId)}&page=0&per_page=200`);
+      if (!Array.isArray(list)) return null;
+      return (
+        list.find(
+          (h) => h && h.id && h.user_id === myId && h.channel_id === channelId && h.display_name === HOOK_NAME
+        ) || null
+      );
+    } catch (e) {
+      dlog("기존 웹훅 조회 실패, 새로 만든다", { error: String(e && e.message ? e.message : e) });
+      return null;
+    }
+  }
+
   // 성공하면 { webhookUrl, channel } 을 돌려준다. 실패는 throw로 알린다.
   // 확장 페이지(팝업/설치 화면)에서 호출해야 한다 - 서비스 워커에는 이 호스트
   // 권한을 사용자 동작 없이 받을 방법이 없다.
@@ -212,6 +234,19 @@
     if (!team) throw new Error("소속된 팀을 찾지 못했어요.");
 
     const channelId = await ensureHomeChannel(team.id);
+
+    // 채널과 마찬가지로, 전에 만들어 둔 웹훅이 있으면 그대로 쓴다.
+    // 예전에는 누를 때마다 새로 만들었다. 웹훅은 지우기 전까지 계속 살아
+    // 있으므로, 다시 연결할 때마다(기기를 옮기거나, 설정을 다시 하거나,
+    // 테스트하거나) 통합 목록에 좀비가 한 줄씩 쌓였다. 그중 하나를 아직
+    // 들고 있는 옛 설치본이 어딘가에서 돌고 있으면, 그쪽이 자기가 아는
+    // 출석 상태(대개 "아직 입실 안 함")로 메시지를 계속 보낸다. 사용자
+    // 입장에서는 "이미 출첵했는데 경고가 온다"로 보인다.
+    const existing = await findMyHook(team.id, channelId, me.id);
+    if (existing) {
+      dlog("기존 웹훅 재사용", { username: me.username, team: team.name, channelId, hookId: existing.id });
+      return { webhookUrl: hookUrl(existing.id), channel: "@" + me.username };
+    }
 
     const hook = await api("/hooks/incoming", {
       channel_id: channelId,

@@ -321,6 +321,9 @@ const ATTENDANCE_DEFAULT = {
   checkoutMin: null,
   pageCheckinMin: null, // 출석 위젯에 찍힌 시각 (서버 기준, 더 신뢰도 높음)
   pageCheckoutMin: null,
+  // 위젯에 시각이 안 찍혀도 "정상 출석" 문구가 보이면 입실한 것이다.
+  // 시각만 믿으면 문구만 있는 화면에서 "입실 안 함"으로 오판한다.
+  pageCheckedIn: false,
 };
 
 function numOrNull(v) {
@@ -400,16 +403,21 @@ async function notifyAttendanceDone(kind, minutes) {
 async function handleAttendanceObserved(msg) {
   const ci = numOrNull(msg.checkinMin);
   const co = numOrNull(msg.checkoutMin);
+  // 시각이 있으면 당연히 입실한 것이고, 시각이 없어도 페이지가 입실했다고
+  // 하면(= "정상 출석" 문구) 그대로 믿는다.
+  const inDone = ci != null || msg.checkedIn === true;
   const a = await getAttendance();
+  const same = a.pageCheckinMin === ci && a.pageCheckoutMin === co && a.pageCheckedIn === inDone;
   SsafyDebug.log("보고", "위젯 관찰 도착", {
-    입실: ci == null ? "없음" : hhmm(ci),
+    입실: ci == null ? (inDone ? "시각 없이 정상 출석" : "없음") : hhmm(ci),
     퇴실: co == null ? "없음" : hhmm(co),
-    바뀜: !(a.pageCheckinMin === ci && a.pageCheckoutMin === co),
+    바뀜: !same,
   });
-  if (a.pageCheckinMin === ci && a.pageCheckoutMin === co) return { ok: true };
+  if (same) return { ok: true };
   a.date = todayStr();
   a.pageCheckinMin = ci;
   a.pageCheckoutMin = co;
+  a.pageCheckedIn = inDone;
   await chrome.storage.local.set({ attendance: a });
 
   // 위젯에 시각이 찍혔다는 건 서버가 출석을 받았다는 뜻이라, 클릭 감지보다
@@ -444,7 +452,7 @@ async function handleMattermostWarning(totalMin) {
   SsafyDebug.log("경고", `${hhmm(totalMin)} 판단 시작`, {
     클릭입실: a.checkinMin == null ? "없음" : hhmm(a.checkinMin),
     클릭퇴실: a.checkoutMin == null ? "없음" : hhmm(a.checkoutMin),
-    위젯입실: a.pageCheckinMin == null ? "없음" : hhmm(a.pageCheckinMin),
+    위젯입실: a.pageCheckinMin == null ? (a.pageCheckedIn ? "시각 없이 정상 출석" : "없음") : hhmm(a.pageCheckinMin),
     위젯퇴실: a.pageCheckoutMin == null ? "없음" : hhmm(a.pageCheckoutMin),
   });
   // 경고는 일부러 여러 번 보내지만, "같은 시각의 경고"가 두 번 갈 이유는
@@ -452,8 +460,9 @@ async function handleMattermostWarning(totalMin) {
   if (!(await markSentOnce(`warn-${totalMin}`))) return skip("이 시각 경고는 오늘 이미 보냄");
 
   if (MM_WARN_CHECKIN_MINS.includes(totalMin)) {
-    // 위젯에 입실 시각이 찍혀 있으면 폰으로 눌렀더라도 입실한 것이다.
-    if (a.pageCheckinMin != null || a.checkinMin != null) return;
+    // 위젯이 입실했다고 하면 폰으로 눌렀더라도 입실한 것이다. 시각이 안
+    // 찍히고 "정상 출석" 문구만 있는 경우까지 포함한다.
+    if (a.pageCheckedIn || a.pageCheckinMin != null || a.checkinMin != null) return;
     // 남은 시간은 예정 시각이 아니라 지금 시각에서 센다. 알람이 1~2분 늦게
     // 울렸을 때 문구가 실제와 어긋나지 않도록.
     const left = CHECK_IN_MIN - nowMin;

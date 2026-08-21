@@ -135,6 +135,24 @@ test("같은 시각의 경고는 알람이 두 번 울려도 한 번만 보낸�
   assert.equal(posts.length, 1);
 });
 
+test("위젯에 시각이 안 찍혀도 '정상 출석'이면 경고하지 않는다", async () => {
+  // 페이지는 이 문구로 강조를 껐는데 백그라운드만 몰라서, 이미 입실한
+  // 사람에게 경고가 가던 자리다.
+  const { sandbox, posts, store } = loadBackground({ now: at(8, 55), storage: SETTINGS });
+  await sandbox.handleAttendanceObserved({ checkinMin: null, checkoutMin: null, checkedIn: true });
+  assert.equal(store.attendance.pageCheckedIn, true);
+  await sandbox.handleMattermostWarning(8 * 60 + 55);
+  assert.deepEqual(posts, []);
+});
+
+test("위젯이 아직 입실 전이라고 하면 경고는 그대로 간다", async () => {
+  const { sandbox, posts } = loadBackground({ now: at(8, 55), storage: SETTINGS });
+  await sandbox.handleAttendanceObserved({ checkinMin: null, checkoutMin: null, checkedIn: false });
+  await sandbox.handleMattermostWarning(8 * 60 + 55);
+  assert.equal(posts.length, 1);
+  assert.match(posts[0], /아직 입실 체크를 안 했어요/);
+});
+
 test("이미 입실했으면 제 시각에 울려도 보내지 않는다", async () => {
   const { sandbox, posts } = loadBackground({
     now: at(8, 55),

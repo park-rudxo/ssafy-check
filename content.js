@@ -484,11 +484,12 @@
   // 반면 퇴실은 17:50·18:00 알람이 막 워커를 깨워둔 뒤라 잘 도착한다.
   // 웹스토어 빌드에는 15분마다 도는 릴리스 확인 알람마저 없어서(IS_WEBSTORE),
   // 아침에 워커가 잠들어 있을 확률이 개발용 설치본보다 훨씬 높다.
-  function sendToBackground(payload, tries) {
+  function sendToBackground(payload, tries, onGiveUp) {
     const left = tries == null ? 3 : tries;
     const retry = (e) => {
       dlog("보고 실패", { type: payload.type, 남은시도: left - 1, error: String(e && e.message ? e.message : e) });
-      if (left > 1) setTimeout(() => sendToBackground(payload, left - 1), 1000);
+      if (left > 1) setTimeout(() => sendToBackground(payload, left - 1, onGiveUp), 1000);
+      else if (onGiveUp) onGiveUp();
     };
     try {
       const p = chrome.runtime.sendMessage(payload);
@@ -546,16 +547,32 @@
     if (!attendanceWidget()) return;
     const checkinMin = pageCheckinMinutes();
     const checkoutMin = pageCheckoutMinutes();
-    const sig = `${todayStr()}|${checkinMin}|${checkoutMin}`;
+    // 시각을 못 읽어도 "정상 출석" 문구가 보이면 입실한 것이다. 화면에서는
+    // 이미 이 문구로 강조를 끄고 있었는데(isCheckedIn), 백그라운드에는 시각만
+    // 보내고 있어서 시각을 못 읽는 순간 "입실 안 함"으로 보였다.
+    const checkedIn = checkinMin != null || pageHasText(/정상\s*출석/);
+    const sig = `${todayStr()}|${checkinMin}|${checkoutMin}|${checkedIn}`;
     if (sig === lastReportedObserved) return; // 값이 바뀔 때만 보낸다
     lastReportedObserved = sig;
-    dlog("위젯에서 읽음", { checkinMin, checkoutMin });
-    sendToBackground({
-      type: "attendanceObserved",
-      date: todayStr(),
-      checkinMin,
-      checkoutMin,
-    });
+    dlog("위젯에서 읽음", { checkinMin, checkoutMin, checkedIn });
+    sendToBackground(
+      {
+        type: "attendanceObserved",
+        date: todayStr(),
+        checkinMin,
+        checkoutMin,
+        checkedIn,
+      },
+      3,
+      // 세 번 다 실패하면 "보냈다" 표시를 지운다. 그대로 두면 값이 바뀌기
+      // 전까지 다시 보내지 않아서, 보고 한 번을 놓친 대가로 이 페이지를
+      // 닫을 때까지 백그라운드가 "아직 입실 안 했다"로 알고 있게 된다.
+      // 아침에 딱 이렇게 된다 - 서비스 워커가 밤새 잠들어 있다가 입실
+      // 직후의 화면 전환과 겹치면 세 번이 다 흘러가버린다.
+      () => {
+        if (lastReportedObserved === sig) lastReportedObserved = "";
+      }
+    );
   }
 
   // 퇴실 클릭 직후에는 위젯에 시각이 아직 안 찍혔을 수 있다(서버 반영 전).
@@ -632,6 +649,13 @@
     countdown = null;
     attachNavHoverGuard();
 
+    // 위젯에서 읽은 출석 상태 보고는 화면 표시 여부와 무관하게 항상 먼저
+    // 한다. 아래 조건들(쉬는 날·위젯 없는 화면·18:30 이후)에 걸려 return
+    // 되면 보고까지 같이 막혀서, 백그라운드는 "입실 안 했다"인 채로 남아
+    // 경고를 보낸다. 화면에 무엇을 그릴지와 서버 기준 사실을 알리는 일은
+    // 별개다. (reportObserved 자체가 개발자 모드와 위젯 없는 화면을 거른다)
+    reportObserved();
+
     // 아무것도 표시하지 않는 경우:
     //  - 쉬는 날(주말·공휴일·등록한 휴무일)
     //  - 출석 위젯이 없는 화면(커리큘럼·로그인 등). 상태를 알 수 없으므로
@@ -662,7 +686,6 @@
 
     const now = nowMinutes();
     const checkedIn = isCheckedIn();
-    reportObserved();
 
     // ── 입실 박스 ──
     if (!checkedIn) {

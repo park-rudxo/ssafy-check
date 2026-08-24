@@ -38,7 +38,8 @@ after(async () => {
 });
 
 // 개발자 모드로 시각과 입실 상태를 강제한 페이지를 띄우고 content.js 를 올린다.
-async function openPage(dev) {
+// extra 로 저장소에 더 넣을 값(eduAccount 등)을 줄 수 있다.
+async function openPage(dev, extra) {
   const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
   const pageErrors = [];
   page.on("pageerror", (e) => pageErrors.push(String(e)));
@@ -51,7 +52,8 @@ async function openPage(dev) {
       storage: {
         local: { get: (keys, cb) => cb({
           ssafyDev: { enabled: true, forceWeekday: true, ...${JSON.stringify(dev)} },
-          dayOff: { offDays: [], workDays: [] }
+          dayOff: { offDays: [], workDays: [] },
+          ...${JSON.stringify(extra || {})}
         }) },
         onChanged: { addListener: () => {} }
       },
@@ -198,6 +200,51 @@ test("회귀 테스트의 전제 - 라벨에는 '입실'이 있고 페이지에�
     // 우리 요소를 걷어내고 나면, 페이지 자체에는 "입실" 텍스트가 없어야 한다.
     // (이 fixture 는 이미 입실한 상태라 "정상 출석"만 있다)
     assert.deepEqual(result.outside, [], "우리 오버레이 밖에서 '입실' 텍스트가 발견됐다");
+  } finally {
+    await page.close();
+  }
+});
+
+// ── 남의 크롬에서 체크할 때의 안내 ───────────────────────────────────
+// 이 크롬에 연결된 알림의 주인(eduAccount)과 지금 edu.ssafy.com 에 로그인한
+// 사람이 다르면, 지금 앉은 사람에게 "네 알림은 여기로 오지 않는다"를 알려야
+// 한다. 이 화면이 그 사실을 알 수 있는 유일한 곳이다 - 폰으로 가는 알림은
+// 전부 주인에게 간다. (fixture 상단에는 "홍길동님 [로그아웃]"이 있다)
+async function bannerText(page) {
+  return page.evaluate(() => {
+    const b = document.getElementById("ssafy-alert-banner");
+    return b && getComputedStyle(b).display !== "none" ? b.textContent : "";
+  });
+}
+
+test("주인이 다르면 배너로 알린다", async () => {
+  const { page, pageErrors } = await openPage(
+    { checkedIn: "false", time: 8 * 60 + 30 },
+    { eduAccount: { name: "김철수" } }
+  );
+  try {
+    await page.waitForTimeout(1500);
+    const text = await bannerText(page);
+    assert.equal(pageErrors.length, 0, "페이지 에러: " + pageErrors.join(" | "));
+    assert.match(text, /김철수/, "누구의 크롬인지 알려줘야 한다");
+    // 강조 박스는 그대로여야 한다. 지금 앉은 사람도 입실은 눌러야 하고,
+    // 그건 누가 눌러도 맞는 안내다.
+    assert.equal((await page.$$(".ssafy-alert-box")).length, 1, "강조까지 꺼버리면 안 된다");
+  } finally {
+    await page.close();
+  }
+});
+
+test("주인 본인이면 평소 안내 그대로다", async () => {
+  const { page, pageErrors } = await openPage(
+    { checkedIn: "false", time: 8 * 60 + 30 },
+    { eduAccount: { name: "홍길동" } } // fixture 에 로그인된 사람과 같다
+  );
+  try {
+    await page.waitForTimeout(1500);
+    const text = await bannerText(page);
+    assert.equal(pageErrors.length, 0, "페이지 에러: " + pageErrors.join(" | "));
+    assert.match(text, /입실 체크/, "본인인데 다른 사람 취급을 하면 안 된다");
   } finally {
     await page.close();
   }

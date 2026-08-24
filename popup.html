@@ -448,6 +448,11 @@
           <button id="mm-provision" class="btn-test">🔗 Mattermost 로그인하여 시작하기</button>
           <button id="mm-open" class="btn-link">🌐 크롬에서 Mattermost 웹 열기 (로그인 확인)</button>
           <div class="time-hint" id="mm-who"></div>
+          <!-- 이 크롬이 누구의 출석을 알리고 있는지. 남이 내 자리에서 자기
+               아이디로 로그인해 체크하면 그 알림이 나에게 오던 문제 때문에,
+               주인이 아닌 계정의 출석은 무시한다. 잘못 잡혔으면 여기서 푼다. -->
+          <div class="time-hint" id="edu-owner"></div>
+          <button id="edu-owner-reset" class="btn-link" style="display: none">👤 이 브라우저의 주인 다시 지정하기</button>
           <div class="mm-warn">
             ⚠️ <b>데스크탑 앱 로그인은 인식되지 않아요.</b>
             반드시 <b>이 크롬 브라우저에서 웹페이지(meeting.ssafy.com)로 로그인</b>한 뒤 연결하세요.

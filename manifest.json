@@ -30,6 +30,7 @@
       "js": [
         "debug.js",
         "holidays.js",
+        "mattermost.js",
         "content.js"
       ],
       "css": [

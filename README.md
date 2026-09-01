@@ -267,7 +267,7 @@ content.js      # 출석 상태 감지 + 빨간 사각형 강조 + 조퇴 방지
 content.css     # 빨간 사각형/배너 스타일 (깜빡임 애니메이션)
 debug.js        # 진단 로그 (팝업 🐞 진단 로그에서 복사 가능, 전 파일 공용)
 holidays.js     # 공휴일·대체공휴일 판정 (content/background/popup 공용)
-mattermost.js   # 내 웹훅 자동 발급 + 받을 곳 검증 + 설정 완료 판정 (background/popup/welcome 공용)
+mattermost.js   # 내 웹훅 자동 발급 + 받을 곳 검증 + 설정 완료 판정 (content/background/popup/welcome 공용)
 background.js   # 크롬 알림 스케줄러 + Mattermost 전송 + 홈 자동 열기 + Release 업데이트 확인
 popup.html/js   # 현재 상태 + Mattermost/자동 열기 설정 + 버전/업데이트 확인 + 개발자 모드
 welcome.html/css/js  # 첫 설치 시 자동으로 열리는 랜딩 페이지 + 초기 설정 마법사

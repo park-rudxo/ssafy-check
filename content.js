@@ -143,15 +143,24 @@
     return !SsafyHolidays.dayInfo(now, dayOff).off;
   }
 
-  // 설정이 끝났는지. mattermost.js 는 컨텐트 스크립트로 주입하지 않으므로
-  // (페이지에 웹훅 주소를 노출할 이유가 없다) 같은 규칙을 여기서 최소한으로만
-  // 다시 쓴다. 규칙이 바뀌면 mattermost.js 의 isConfigured 와 함께 고쳐야 한다.
-  const USERNAME_RE = /^[a-z][a-z0-9._-]{2,21}$/;
-
+  // 설정이 끝났는지. 예전에는 같은 규칙을 여기에 최소한으로 옮겨 적었는데,
+  // mattermost.js 쪽이 "숫자로 시작하는 아이디도 허용"으로 완화됐을 때 이쪽만
+  // 옛 규칙(첫 글자는 영문)으로 남았다. 그 결과 자동 연동까지 정상으로 끝낸
+  // 사람(예: @1008mjw)이 출석 페이지에서만 "설정을 마쳐야 동작합니다" 안내를
+  // 계속 보게 됐다 - 팝업은 설정됨, 페이지는 설정 안 됨으로 갈라진 것이다.
+  // 그래서 규칙을 옮겨 적는 대신 mattermost.js 를 컨텐트 스크립트로 함께 주입해
+  // 같은 함수 하나로 판단한다. 컨텐트 스크립트는 페이지와 분리된 세계에서
+  // 돌기 때문에 이렇게 해도 페이지 쪽 스크립트가 웹훅 주소를 읽을 수는 없다.
   function isMattermostConfigured() {
-    if (!mm || !mm.enabled) return false;
-    const id = String(mm.channel == null ? "" : mm.channel).trim().replace(/^@+/, "").toLowerCase();
-    return USERNAME_RE.test(id);
+    if (!mm) return false;
+    if (typeof SsafyMattermost !== "undefined") return SsafyMattermost.isConfigured(mm);
+
+    // mattermost.js 를 못 읽은 경우(압축을 덜 푼 폴더 등)의 최소 판정.
+    // 여기서 사용자명 모양까지 다시 따지면 규칙이 또 갈라지므로, 보낼 주소와
+    // 보낼 곳이 둘 다 있는지만 본다.
+    const hook = typeof mm.webhookUrl === "string" ? mm.webhookUrl.trim() : "";
+    const id = String(mm.channel == null ? "" : mm.channel).trim().replace(/^@+/, "");
+    return !!(mm.enabled && hook.startsWith("https://meeting.ssafy.com/hooks/") && id);
   }
 
   // 우리가 그려 넣은 요소(배너·강조 박스·라벨)인지 확인한다.

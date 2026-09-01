@@ -39,12 +39,17 @@
   // 않으므로(아래 update 참고), 페이지에서도 이 값을 알아야 한다.
   let mm = null;
 
+  // 이 브라우저에 연결된 주인(=처음 이 확장으로 출석을 본 에듀싸피 계정).
+  // 백그라운드가 정해서 저장하고, 여기서는 읽기만 한다. (아래 pageAccount 참고)
+  let eduAccount = null;
+
   function loadDevSettings(cb) {
     try {
-      chrome.storage.local.get(["ssafyDev", "dayOff", "mattermost"], (data) => {
+      chrome.storage.local.get(["ssafyDev", "dayOff", "mattermost", "eduAccount"], (data) => {
         dev = { ...DEV_DEFAULTS, ...(data && data.ssafyDev) };
         dayOff = { ...DAYOFF_DEFAULTS, ...(data && data.dayOff) };
         mm = (data && data.mattermost) || null;
+        eduAccount = (data && data.eduAccount) || null;
         if (cb) cb();
       });
     } catch (e) {
@@ -55,10 +60,11 @@
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
-      if (!changes.ssafyDev && !changes.dayOff && !changes.mattermost) return;
+      if (!changes.ssafyDev && !changes.dayOff && !changes.mattermost && !changes.eduAccount) return;
       if (changes.ssafyDev) dev = { ...DEV_DEFAULTS, ...changes.ssafyDev.newValue };
       if (changes.dayOff) dayOff = { ...DAYOFF_DEFAULTS, ...changes.dayOff.newValue };
       if (changes.mattermost) mm = changes.mattermost.newValue || null;
+      if (changes.eduAccount) eduAccount = changes.eduAccount.newValue || null;
       update();
     });
   } catch (e) {
@@ -237,6 +243,152 @@
 
   function findCheckOutButton() {
     return findClickableByText(/퇴실\s*하기/);
+  }
+
+  // ── 지금 이 화면에 로그인된 에듀싸피 계정 ─────────────────────────────
+  // 왜 이걸 읽어야 하나:
+  // 이 확장의 Mattermost 설정은 "크롬 프로필"에 붙어 있는데, 출석 상태는
+  // 그때그때 edu.ssafy.com 에 로그인된 "사람"의 것이다. 평소에는 둘이 같아서
+  // 문제가 없지만, 시험처럼 자리를 옮겨 앉는 날 남의 PC(크롬은 그 사람 계정으로
+  // 로그인된 채)에서 자기 아이디로 에듀싸피에 로그인해 입실을 누르면, 그
+  // "입실 체크 완료" 알림이 PC 주인에게 간다. 주인은 아직 오지도 않았는데
+  // 자기가 체크된 줄 알고 안심하다 미입실 처리된다 - 실제로 일어난 사고다.
+  //
+  // 그래서 화면에 뜬 이름을 함께 보고해서, 백그라운드가 "이건 이 브라우저
+  // 주인의 출석이 아니다"를 판단할 수 있게 한다.
+  //
+  // 못 읽으면 빈 문자열이고, 그러면 백그라운드는 예전과 똑같이 동작한다.
+  // 사이트 구조가 바뀌어 이름을 못 읽게 되는 순간 알림이 통째로 멎는 쪽이
+  // 훨씬 나쁘기 때문에, 확신이 설 때만 막는다.
+
+  // 이름이 들어 있을 법한 곳. 사이트가 바뀌어도 하나쯤은 걸리도록 넉넉히 둔다.
+  const ACCOUNT_NAME_SELECTORS = [
+    ".user-name",
+    ".userName",
+    ".username",
+    "#userName",
+    ".user_name",
+    ".profile-name",
+    ".my-name",
+    ".user-info .name",
+    ".userInfo .name",
+    ".login-info .name",
+  ];
+
+  // 상단 영역. "OOO님"을 찾을 때 이 안에서만 찾는다. 본문까지 뒤지면
+  // 게시글 작성자("홍길동님이 댓글을...")처럼 화면마다 바뀌는 이름을 잡아
+  // 애먼 사람을 남으로 오해하게 된다.
+  const ACCOUNT_SCOPE_SELECTORS = [
+    "header",
+    "#header",
+    ".header",
+    "#gnb",
+    ".gnb",
+    ".util",
+    ".top-util",
+    ".user-info",
+    ".userInfo",
+    ".login-info",
+  ];
+
+  // "홍길동 님" / "홍길동님" 에서 이름만 뽑는다. 한글 이름은 2~4자가
+  // 대부분이라 그보다 길게 잡으면 앞말까지 딸려온다.
+  const ACCOUNT_NAME_RE = /([가-힣]{2,4})\s*님/g;
+
+  // "님"이 붙지만 사람 이름이 아닌 말들. 이걸 이름으로 잡으면 화면마다
+  // 주인이 바뀌는 것처럼 보인다.
+  const NOT_A_NAME = ["선생", "고객", "회원", "관리자", "여러분", "교수", "조교", "학부모"];
+
+  function cleanAccountName(text) {
+    const t = String(text == null ? "" : text)
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/\s*님$/, "");
+    if (!t) return "";
+
+    // 화면마다 이름 옆에 붙는 것이 다르다 ("홍길동", "홍길동님", "홍길동 (0123456)").
+    // 붙은 것까지 그대로 쓰면 같은 사람인데도 화면을 옮길 때마다 다른 사람으로
+    // 보여서, 자기 출석이 자기 알림에서 막힌다. 한글 이름 부분만 뽑아 어느
+    // 경로로 읽든 같은 값이 나오게 한다.
+    const hangul = /[가-힣]{2,4}/.exec(t);
+    const name = hangul ? hangul[0] : t;
+    if (name.length > 20) return "";
+    if (NOT_A_NAME.includes(name)) return "";
+    return name;
+  }
+
+  function nameFromScope(root) {
+    if (!root) return "";
+    const text = root.innerText || root.textContent || "";
+    // "선생님" 같은 말이 먼저 걸려도 거기서 포기하지 않고 계속 본다.
+    ACCOUNT_NAME_RE.lastIndex = 0;
+    let m;
+    while ((m = ACCOUNT_NAME_RE.exec(text))) {
+      const name = cleanAccountName(m[1]);
+      if (name) return name;
+    }
+    return "";
+  }
+
+  // 한 번 갱신할 때 여러 번 부르고(배너 판단 + 보고 두 곳), update 는 DOM이
+  // 바뀔 때마다 도는데 innerText 는 레이아웃을 강제한다. 잠깐 캐싱해서
+  // 화면이 활발히 바뀌는 동안에도 부담이 되지 않게 한다.
+  const ACCOUNT_CACHE_MS = 5000;
+  let accountCache = { at: 0, value: "" };
+
+  function pageAccount() {
+    const now = Date.now();
+    if (now - accountCache.at < ACCOUNT_CACHE_MS) return accountCache.value;
+    const value = findPageAccount();
+    accountCache = { at: now, value };
+    return value;
+  }
+
+  function findPageAccount() {
+    // 1) 이름만 들어 있는 전용 요소가 있으면 그게 가장 정확하다.
+    for (const sel of ACCOUNT_NAME_SELECTORS) {
+      let el;
+      try {
+        el = document.querySelector(sel);
+      } catch (e) {
+        continue; // 선택자를 못 쓰는 브라우저가 있어도 나머지는 계속 본다
+      }
+      if (!el || isOurs(el)) continue;
+      const name = cleanAccountName(el.textContent);
+      if (name) return name;
+    }
+
+    // 2) 로그아웃 버튼 옆에는 거의 항상 내 이름이 붙어 있다.
+    const logout = findClickableByText(/로그아웃/);
+    if (logout) {
+      const name = nameFromScope(logout.parentElement) || nameFromScope(logout.closest("div, li, ul, nav, header"));
+      if (name) return name;
+    }
+
+    // 3) 마지막으로 상단 영역에서 "OOO님"을 찾는다.
+    for (const sel of ACCOUNT_SCOPE_SELECTORS) {
+      let el;
+      try {
+        el = document.querySelector(sel);
+      } catch (e) {
+        continue;
+      }
+      if (!el || isOurs(el)) continue;
+      const name = nameFromScope(el);
+      if (name) return name;
+    }
+
+    return "";
+  }
+
+  // 이 브라우저에 연결된 주인(eduAccount.name)과 지금 화면의 계정이 다르면
+  // 그 주인 이름을 돌려준다. 같거나 알 수 없으면 빈 문자열.
+  function otherOwnerName() {
+    const owner = eduAccount && eduAccount.name ? String(eduAccount.name) : "";
+    if (!owner) return "";
+    const here = pageAccount();
+    if (!here || here === owner) return "";
+    return owner;
   }
 
   // ── 페이지에 표시된 출석 상태 읽기 ──────────────────────────────────
@@ -429,7 +581,17 @@
     nav.addEventListener("mouseleave", () => setNavHovered(false));
   }
 
+  // 이 크롬의 주인과 지금 로그인한 사람이 다를 때 띄우는 문구. 비어 있지
+  // 않으면 다른 어떤 안내보다 우선해서 배너를 차지한다 - 지금 이 자리에 앉은
+  // 사람에게는 "네 알림은 여기로 오지 않는다"가 가장 먼저 알아야 할 사실이고,
+  // 이 안내를 보고 자기 크롬에 확장을 설치하러 갈 수 있다.
+  let accountNotice = "";
+
   function showBanner(message, tone) {
+    if (accountNotice) {
+      message = accountNotice;
+      tone = "warn";
+    }
     let banner = document.getElementById(BANNER_ID);
     if (!banner) {
       banner = document.createElement("div");
@@ -442,6 +604,12 @@
   }
 
   function hideBanner() {
+    // 주인이 다르다는 안내는 감출 수 없다. 다른 안내가 사라지는 자리마다
+    // 이 문구가 남아야, 화면 어느 상태에서도 한 번은 눈에 들어온다.
+    if (accountNotice) {
+      showBanner(accountNotice, "warn");
+      return;
+    }
     const banner = document.getElementById(BANNER_ID);
     if (banner) banner.style.display = "none";
   }
@@ -526,6 +694,9 @@
       kind: key === CHECKIN_KEY ? "checkin" : "checkout",
       minutes,
       date: todayStr(),
+      // 이 출석이 누구 것인지. 남의 PC에서 눌렀을 때 그 PC 주인에게 "완료"
+      // 알림이 가는 것을 백그라운드에서 막기 위한 값이다.
+      account: pageAccount(),
     });
   }
 
@@ -555,7 +726,9 @@
     if (!attendanceWidget()) return;
     const checkinMin = pageCheckinMinutes();
     const checkoutMin = pageCheckoutMinutes();
-    const sig = `${todayStr()}|${checkinMin}|${checkoutMin}`;
+    // 계정도 서명에 넣는다. 시각이 같아도 로그인한 사람이 바뀌었으면 그건
+    // 다른 사람의 출석이라 다시 보고해야 한다.
+    const sig = `${todayStr()}|${pageAccount()}|${checkinMin}|${checkoutMin}`;
     if (sig === lastReportedObserved) return; // 값이 바뀔 때만 보낸다
     lastReportedObserved = sig;
     dlog("위젯에서 읽음", { checkinMin, checkoutMin });
@@ -564,6 +737,7 @@
       date: todayStr(),
       checkinMin,
       checkoutMin,
+      account: pageAccount(),
     });
   }
 
@@ -639,6 +813,7 @@
 
   function update() {
     countdown = null;
+    accountNotice = "";
     attachNavHoverGuard();
 
     // 아무것도 표시하지 않는 경우:
@@ -668,6 +843,16 @@
       showBanner("⚙️ 설정을 마쳐야 동작합니다. 확장 아이콘을 눌러 Mattermost 알림을 설정하세요.", "warn");
       return;
     }
+
+    // 이 크롬에 연결된 알림의 주인과 지금 로그인한 사람이 다른지 본다.
+    // 화면 강조(네모 박스)는 그대로 둔다 - 지금 앉은 사람도 입실·퇴실은
+    // 눌러야 하고, 그건 누가 눌러도 맞는 안내다. 다만 "폰으로 오는 알림"은
+    // 주인에게만 가므로 그 사실만 배너로 알린다. (쉬는 날·강조가 꺼진
+    // 시간대에는 여기까지 오지 않아 조용하다)
+    const owner = otherOwnerName();
+    accountNotice = owner
+      ? `👤 이 크롬에는 ${owner}님의 출석 알리미가 연결돼 있어요. 지금 로그인한 계정의 알림은 오지 않습니다 — 본인 크롬에 확장을 설치해 설정하세요.`
+      : "";
 
     const now = nowMinutes();
     const checkedIn = isCheckedIn();

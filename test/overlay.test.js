@@ -38,7 +38,8 @@ after(async () => {
 });
 
 // 개발자 모드로 시각과 입실 상태를 강제한 페이지를 띄우고 content.js 를 올린다.
-async function openPage(dev, mm) {
+// extra 로 저장소에 더 넣을 값(eduAccount, mattermost 등)을 줄 수 있다.
+async function openPage(dev, extra) {
   const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
   const pageErrors = [];
   page.on("pageerror", (e) => pageErrors.push(String(e)));
@@ -53,7 +54,7 @@ async function openPage(dev, mm) {
         local: { get: (keys, cb) => cb({
           ssafyDev: { enabled: true, forceWeekday: true, ...${JSON.stringify(dev)} },
           dayOff: { offDays: [], workDays: [] },
-          mattermost: ${JSON.stringify(mm || null)}
+          ...${JSON.stringify(extra || {})}
         }) },
         onChanged: { addListener: () => {} }
       },
@@ -207,6 +208,36 @@ test("회귀 테스트의 전제 - 라벨에는 '입실'이 있고 페이지에�
   }
 });
 
+// ── 남의 크롬에서 체크할 때의 안내 ───────────────────────────────────
+// 이 크롬에 연결된 알림의 주인(eduAccount)과 지금 edu.ssafy.com 에 로그인한
+// 사람이 다르면, 지금 앉은 사람에게 "네 알림은 여기로 오지 않는다"를 알려야
+// 한다. 이 화면이 그 사실을 알 수 있는 유일한 곳이다 - 폰으로 가는 알림은
+// 전부 주인에게 간다. (fixture 상단에는 "홍길동님 [로그아웃]"이 있다)
+async function bannerText(page) {
+  return page.evaluate(() => {
+    const b = document.getElementById("ssafy-alert-banner");
+    return b && getComputedStyle(b).display !== "none" ? b.textContent : "";
+  });
+}
+
+test("주인이 다르면 배너로 알린다", async () => {
+  const { page, pageErrors } = await openPage(
+    { checkedIn: "false", time: 8 * 60 + 30 },
+    { eduAccount: { name: "김철수" } }
+  );
+  try {
+    await page.waitForTimeout(1500);
+    const text = await bannerText(page);
+    assert.equal(pageErrors.length, 0, "페이지 에러: " + pageErrors.join(" | "));
+    assert.match(text, /김철수/, "누구의 크롬인지 알려줘야 한다");
+    // 강조 박스는 그대로여야 한다. 지금 앉은 사람도 입실은 눌러야 하고,
+    // 그건 누가 눌러도 맞는 안내다.
+    assert.equal((await page.$$(".ssafy-alert-box")).length, 1, "강조까지 꺼버리면 안 된다");
+  } finally {
+    await page.close();
+  }
+});
+
 // 설정을 마쳤는데도 "설정을 마쳐야 동작합니다" 배너가 뜨던 버그의 회귀 테스트.
 // content.js 가 사용자명 규칙을 따로 옮겨 적고 있었는데, mattermost.js 쪽만
 // "숫자로 시작하는 아이디 허용"으로 완화되면서 규칙이 갈라졌다. 그래서 자동
@@ -219,7 +250,10 @@ const CONFIGURED_MM = {
 };
 
 test("설정을 마친 숫자 시작 아이디 - 안내 배너 대신 강조가 뜬다", async () => {
-  const { page, pageErrors } = await openPage({ checkedIn: "false", time: 8 * 60 + 30 }, CONFIGURED_MM);
+  const { page, pageErrors } = await openPage(
+    { checkedIn: "false", time: 8 * 60 + 30 },
+    { mattermost: CONFIGURED_MM }
+  );
   try {
     await page.waitForSelector(".ssafy-alert-box", { timeout: 5000 });
     await page.waitForTimeout(700);
@@ -238,12 +272,27 @@ test("설정을 마친 숫자 시작 아이디 - 안내 배너 대신 강조가 
   }
 });
 
+test("주인 본인이면 평소 안내 그대로다", async () => {
+  const { page, pageErrors } = await openPage(
+    { checkedIn: "false", time: 8 * 60 + 30 },
+    { eduAccount: { name: "홍길동" } } // fixture 에 로그인된 사람과 같다
+  );
+  try {
+    await page.waitForTimeout(1500);
+    const text = await bannerText(page);
+    assert.equal(pageErrors.length, 0, "페이지 에러: " + pageErrors.join(" | "));
+    assert.match(text, /입실 체크/, "본인인데 다른 사람 취급을 하면 안 된다");
+  } finally {
+    await page.close();
+  }
+});
+
 // 반대 방향도 함께 잡아둔다. 웹훅이 없으면(아이디만 있는 옛 설정 등) 아직
 // 알림을 보낼 수 없으므로 강조 대신 안내가 떠야 한다.
 test("웹훅이 없으면 - 강조 대신 설정 안내가 뜬다", async () => {
   const { page, pageErrors } = await openPage(
     { checkedIn: "false", time: 8 * 60 + 30 },
-    { enabled: true, channel: "@1008mjw", webhookUrl: "" }
+    { mattermost: { enabled: true, channel: "@1008mjw", webhookUrl: "" } }
   );
   try {
     await page.waitForTimeout(2000);

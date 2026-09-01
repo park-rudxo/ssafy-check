@@ -20,6 +20,10 @@
   };
   let mm = { ...MM_DEFAULTS };
 
+  // 이 브라우저에 기억된 에듀싸피 계정(주인). 백그라운드가 정하고, 팝업은
+  // 보여주고 푸는 일만 한다. { name, boundAt } 또는 null.
+  let eduAccount = null;
+
   // offDays  : 사용자가 등록한 개인 휴무일(연차·공가 등)
   // workDays : 공휴일이지만 평일로 취급할 날 (공휴일 표가 틀렸을 때의 탈출구)
   const DAYOFF_DEFAULTS = { offDays: [], workDays: [] };
@@ -211,6 +215,8 @@
       ? `연결됨: ${mm.channel} — 내 전용 통로로 나에게만 갑니다.`
       : "";
 
+    renderEduOwner();
+
     // 예전 버전에서 설정이 덜 된 채로 켜둔 값이 남아 있을 수 있다. 조용히
     // 안 오는 것보다 이유를 알려주는 편이 낫다.
     if (mm.enabled && !done) {
@@ -218,6 +224,32 @@
     }
 
     renderSetupGate();
+  }
+
+  // ── 이 브라우저의 주인 (에듀싸피 계정) ──────────────────────────────
+  // 남이 내 자리에서 자기 아이디로 로그인해 출석을 누르면 그 알림이 나에게
+  // 오던 문제 때문에, 확장은 처음 본 에듀싸피 계정을 이 브라우저의 주인으로
+  // 기억하고 그 외 계정의 출석은 무시한다. 사람이 볼 수 없으면 "왜 알림이
+  // 안 오지"의 답을 찾을 길이 없으므로 여기에 드러내고, 잘못 잡혔을 때
+  // 풀 수 있는 버튼도 함께 둔다.
+  function renderEduOwner() {
+    const line = document.getElementById("edu-owner");
+    const btn = document.getElementById("edu-owner-reset");
+    if (!line || !btn) return;
+    const name = eduAccount && eduAccount.name ? eduAccount.name : "";
+    line.textContent = name
+      ? `이 브라우저의 주인: ${name}님 — 다른 계정으로 로그인해 체크한 출석은 알리지 않아요.`
+      : "이 브라우저의 주인: 아직 없음 — edu.ssafy.com 을 처음 여는 계정을 주인으로 기억합니다.";
+    btn.style.display = name ? "block" : "none";
+  }
+
+  function resetEduOwner() {
+    eduAccount = null;
+    try {
+      chrome.storage.local.remove("eduAccount", renderEduOwner);
+    } catch (e) {
+      renderEduOwner();
+    }
   }
 
   function saveMattermost() {
@@ -277,6 +309,9 @@
           // 연결만 해놓고 안 켠 상태로 남아 아무것도 안 오는 사람이 생긴다.
           mm.enabled = true;
           saveMattermost();
+          // 계정을 새로 연결했다는 건 "이제부터 이 크롬은 내 것"이라는 뜻이다.
+          // 예전 주인이 남아 있으면 새 주인의 출석이 전부 무시된다.
+          resetEduOwner();
           btn.disabled = false;
           setMmStatus(`✅ ${res.channel} 로 연결했어요. 테스트 메시지를 보내 확인해보세요.`, "ok");
         })
@@ -518,6 +553,7 @@
     });
 
     document.getElementById("mm-provision").addEventListener("click", provisionMattermost);
+    document.getElementById("edu-owner-reset").addEventListener("click", resetEduOwner);
     document.getElementById("mm-test").addEventListener("click", testMattermost);
 
     document.getElementById("dev-enabled").addEventListener("change", (e) => {
@@ -668,7 +704,7 @@
       document.getElementById("version-label").textContent = "";
     }
     try {
-      chrome.storage.local.get(["ssafyDev", "autoOpen", "mattermost", "dayOff"], (data) => {
+      chrome.storage.local.get(["ssafyDev", "autoOpen", "mattermost", "dayOff", "eduAccount"], (data) => {
         dev = { ...DEV_DEFAULTS, ...(data && data.ssafyDev) };
         // 켜진 상태인데 time이 비어 있으면 기본 가상 시각으로 채운다.
         if (dev.enabled && dev.time == null) dev.time = hhmmToMinutes("08:30");
@@ -676,6 +712,7 @@
         autoOpen = { ...AUTO_OPEN_DEFAULTS, ...(data && data.autoOpen) };
         mm = { ...MM_DEFAULTS, ...(data && data.mattermost) };
         dayOff = { ...DAYOFF_DEFAULTS, ...(data && data.dayOff) };
+        eduAccount = (data && data.eduAccount) || null;
         if (mm.enabled) {
           document.getElementById("mm-body").classList.add("open");
           document.getElementById("mm-header").classList.add("open");

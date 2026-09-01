@@ -307,6 +307,85 @@ function numOrNull(v) {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+// ── 이 브라우저의 주인 (에듀싸피 계정) ────────────────────────────────
+// 실제로 일어난 사고: 시험날 자리를 옮겨 앉으면서, A의 PC(크롬은 A로 로그인된
+// 채)에 B가 앉아 자기 아이디로 edu.ssafy.com 에 로그인해 입실을 눌렀다.
+// 확장의 Mattermost 설정은 크롬 프로필에 붙어 있어서, B의 입실이 A에게
+// "✅ 입실 체크 완료"로 전달됐다. A는 아직 오지도 않았는데 자기가 체크된 줄
+// 알게 되고, 게다가 그 기록이 A의 오늘치 출석 상태로 저장되는 바람에
+// "아직 입실 안 했어요" 경고까지 멎는다 - 정확히 이 확장이 막으려던 상황을
+// 이 확장이 만든 셈이다.
+//
+// 그래서 content.js 가 화면에서 읽은 이름을 함께 보내고, 그 이름이 이
+// 브라우저의 주인과 다르면 그 보고를 통째로 무시한다.
+//
+// 주인은 "처음 본 이름"으로 정한다. 설정 화면에서는 edu.ssafy.com 페이지를
+// 읽을 수 없어 물어볼 방법이 없고, 확장을 깐 사람이 자기 크롬에서 처음
+// 출석을 여는 것이 정상 경로다. 잘못 잡혔을 때를 위해 팝업에 다시 지정하는
+// 버튼을 두고, Mattermost를 다시 연결하면 자동으로 풀린다.
+const EDU_ACCOUNT_DEFAULT = { name: "", boundAt: "" };
+
+async function getEduAccount() {
+  const { eduAccount } = await chrome.storage.local.get("eduAccount");
+  return { ...EDU_ACCOUNT_DEFAULT, ...(eduAccount || {}) };
+}
+
+function accountName(v) {
+  return typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, 20) : "";
+}
+
+// 보고에 실린 계정이 이 브라우저 주인의 것인지 본다.
+//   { ok: true }                     - 주인이거나, 판단할 근거가 없음
+//   { ok: false, mine, theirs }      - 다른 사람의 출석이다
+//
+// 이름을 못 읽었으면(빈 값) 무조건 통과시킨다. 사이트 구조가 바뀌어 이름을
+// 못 읽게 되는 순간 모두의 알림이 통째로 멎는 쪽이, 어쩌다 한 번 남의 알림이
+// 가는 것보다 훨씬 나쁘기 때문이다. 확신이 설 때만 막는다.
+async function checkEduOwner(reported) {
+  const name = accountName(reported);
+  if (!name) return { ok: true };
+
+  const acct = await getEduAccount();
+  if (!acct.name) {
+    await chrome.storage.local.set({ eduAccount: { name, boundAt: todayStr() } });
+    SsafyDebug.log("계정", "이 브라우저의 주인으로 기억함", { name });
+    return { ok: true };
+  }
+  if (acct.name === name) return { ok: true };
+  return { ok: false, mine: acct.name, theirs: name };
+}
+
+// 남의 출석을 무시했다는 사실은 조용히 넘기면 안 된다. 주인은 "완료 알림이
+// 왜 없지"가 아니라 "내가 아직 안 했구나"를 알아야 하고, 지금 그 PC에 앉은
+// 사람은 자기 알림이 여기로 오지 않는다는 걸 알아야 한다.
+// 하루 한 번만 알린다 (화면을 볼 때마다 보고가 오므로).
+async function warnEduOwnerMismatch(mine, theirs) {
+  SsafyDebug.log("계정", "다른 계정의 출석이라 무시함", { mine, theirs });
+  if (!(await markSentOnce("edu-account-mismatch"))) return;
+
+  try {
+    chrome.notifications.create("ssafy-account-mismatch-" + Date.now(), {
+      type: "basic",
+      iconUrl: "icons/icon128.png",
+      title: "다른 계정으로 로그인되어 있어요",
+      message: `이 크롬은 ${mine}님의 출석 알리미인데 지금 edu.ssafy.com 에는 ${theirs}님이 로그인해 있어요. ${theirs}님의 출석은 알리지 않습니다.`,
+      priority: 2,
+    });
+  } catch (e) {
+    /* 알림 권한이 없어도 아래 Mattermost 쪽은 보낸다 */
+  }
+
+  const s = await getMattermost();
+  if (!s.enabled || !SsafyMattermost.isValidTarget(s.channel)) return;
+  await postToMattermost(
+    `⚠️ **다른 계정의 출석이라 알리지 않았어요**\n` +
+      `이 크롬에 연결된 알림은 **${mine}**님 것인데, 지금 edu.ssafy.com 에는 **${theirs}**님이 로그인해 있어요.\n` +
+      `방금 감지된 입실/퇴실은 ${theirs}님의 것이라 "완료"로 알리지 않았습니다. ` +
+      `**${mine}님의 오늘 출석은 아직 그대로**이니 직접 확인하세요.\n${SSAFY_HOME}`,
+    s
+  );
+}
+
 async function getAttendance() {
   const { attendance } = await chrome.storage.local.get("attendance");
   const a = { ...ATTENDANCE_DEFAULT, ...(attendance || {}) };
@@ -332,7 +411,16 @@ async function handleAttendanceRecorded(msg) {
   const minutes = Number(msg.minutes);
   if (!Number.isFinite(minutes)) return { ok: false };
 
-  SsafyDebug.log("보고", "버튼 클릭 도착", { kind, minutes: hhmm(minutes) });
+  SsafyDebug.log("보고", "버튼 클릭 도착", { kind, minutes: hhmm(minutes), account: msg.account || "(모름)" });
+
+  // 이 브라우저 주인의 출석이 아니면 기록도 알림도 하지 않는다. 기록까지
+  // 막아야 하는 이유: 남의 입실을 오늘치로 저장해두면 "아직 입실 안 했어요"
+  // 경고가 멎어서, 주인은 완료 알림도 못 받고 경고도 못 받는다.
+  const owner = await checkEduOwner(msg.account);
+  if (!owner.ok) {
+    await warnEduOwnerMismatch(owner.mine, owner.theirs);
+    return { ok: false, ignored: "other-account" };
+  }
 
   const a = await getAttendance();
   a.date = todayStr();
@@ -380,6 +468,15 @@ async function notifyAttendanceDone(kind, minutes) {
 async function handleAttendanceObserved(msg) {
   const ci = numOrNull(msg.checkinMin);
   const co = numOrNull(msg.checkoutMin);
+
+  // 위젯에 찍힌 시각도 결국 "지금 로그인한 사람"의 것이다. 주인이 아니면
+  // 그 사람의 출석 상태를 주인의 오늘치로 덮어쓰면 안 된다.
+  const owner = await checkEduOwner(msg.account);
+  if (!owner.ok) {
+    await warnEduOwnerMismatch(owner.mine, owner.theirs);
+    return { ok: false, ignored: "other-account" };
+  }
+
   const a = await getAttendance();
   SsafyDebug.log("보고", "위젯 관찰 도착", {
     입실: ci == null ? "없음" : hhmm(ci),

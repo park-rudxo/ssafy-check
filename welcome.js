@@ -116,6 +116,15 @@
       })
       .then((res) => {
         mm = { ...mm, webhookUrl: res.webhookUrl, channel: res.channel, enabled: true };
+        // 이 크롬이 누구 것인지도 다시 잡는다. 확장은 처음 본 에듀싸피 계정을
+        // 이 브라우저의 주인으로 기억해 다른 계정의 출석은 무시하는데(남의
+        // 자리에서 로그인해 체크한 알림이 자리 주인에게 가던 문제), 계정을
+        // 새로 연결한 순간부터는 그 사람이 주인이어야 한다.
+        try {
+          chrome.storage.local.remove("eduAccount");
+        } catch (e) {
+          /* 못 지워도 연결 자체는 끝났으므로 계속 진행한다 */
+        }
         return save({ mattermost: mm }).then(() => {
           btn.disabled = false;
           renderMattermost();

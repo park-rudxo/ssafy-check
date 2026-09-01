@@ -38,7 +38,7 @@ after(async () => {
 });
 
 // 개발자 모드로 시각과 입실 상태를 강제한 페이지를 띄우고 content.js 를 올린다.
-async function openPage(dev) {
+async function openPage(dev, mm) {
   const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
   const pageErrors = [];
   page.on("pageerror", (e) => pageErrors.push(String(e)));
@@ -46,12 +46,14 @@ async function openPage(dev) {
   await page.goto(FIXTURE);
 
   // content.js 가 실제로 쓰는 chrome API 만 흉내 낸다.
+  // mattermost 는 저장소에 값이 없는 상태(설정 판정을 하지 않음)를 기본으로 둔다.
   await page.addScriptTag({
     content: `window.chrome = {
       storage: {
         local: { get: (keys, cb) => cb({
           ssafyDev: { enabled: true, forceWeekday: true, ...${JSON.stringify(dev)} },
-          dayOff: { offDays: [], workDays: [] }
+          dayOff: { offDays: [], workDays: [] },
+          mattermost: ${JSON.stringify(mm || null)}
         }) },
         onChanged: { addListener: () => {} }
       },
@@ -61,6 +63,8 @@ async function openPage(dev) {
 
   await page.addStyleTag({ content: fs.readFileSync(path.join(ROOT, "content.css"), "utf8") });
   await page.addScriptTag({ content: fs.readFileSync(path.join(ROOT, "holidays.js"), "utf8") });
+  // manifest 와 같은 순서로 올린다 - content.js 는 설정 완료 판정을 이 모듈에 맡긴다.
+  await page.addScriptTag({ content: fs.readFileSync(path.join(ROOT, "mattermost.js"), "utf8") });
   await page.addScriptTag({ content: fs.readFileSync(path.join(ROOT, "content.js"), "utf8") });
 
   return { page, pageErrors };
@@ -198,6 +202,61 @@ test("회귀 테스트의 전제 - 라벨에는 '입실'이 있고 페이지에�
     // 우리 요소를 걷어내고 나면, 페이지 자체에는 "입실" 텍스트가 없어야 한다.
     // (이 fixture 는 이미 입실한 상태라 "정상 출석"만 있다)
     assert.deepEqual(result.outside, [], "우리 오버레이 밖에서 '입실' 텍스트가 발견됐다");
+  } finally {
+    await page.close();
+  }
+});
+
+// 설정을 마쳤는데도 "설정을 마쳐야 동작합니다" 배너가 뜨던 버그의 회귀 테스트.
+// content.js 가 사용자명 규칙을 따로 옮겨 적고 있었는데, mattermost.js 쪽만
+// "숫자로 시작하는 아이디 허용"으로 완화되면서 규칙이 갈라졌다. 그래서 자동
+// 연동으로 @1008mjw 처럼 숫자로 시작하는 아이디를 받은 사람은 팝업에서는
+// 설정 완료로 보이는데 출석 페이지에서만 계속 안내 배너를 봤다.
+const CONFIGURED_MM = {
+  enabled: true,
+  channel: "@1008mjw",
+  webhookUrl: "https://meeting.ssafy.com/hooks/hz8ef7zb9f8qxqq9ru5drqug4a",
+};
+
+test("설정을 마친 숫자 시작 아이디 - 안내 배너 대신 강조가 뜬다", async () => {
+  const { page, pageErrors } = await openPage({ checkedIn: "false", time: 8 * 60 + 30 }, CONFIGURED_MM);
+  try {
+    await page.waitForSelector(".ssafy-alert-box", { timeout: 5000 });
+    await page.waitForTimeout(700);
+    const state = await page.evaluate(() => {
+      const banner = document.getElementById("ssafy-alert-banner");
+      return {
+        boxes: document.querySelectorAll(".ssafy-alert-box").length,
+        bannerText: banner && getComputedStyle(banner).display !== "none" ? banner.innerText : "",
+      };
+    });
+    assert.equal(pageErrors.length, 0, "페이지 에러: " + pageErrors.join(" | "));
+    assert.ok(state.boxes > 0, "설정을 마쳤으면 강조 박스가 떠야 한다");
+    assert.doesNotMatch(state.bannerText, /설정을 마쳐야/, "설정을 마쳤는데 설정 안내 배너가 떴다");
+  } finally {
+    await page.close();
+  }
+});
+
+// 반대 방향도 함께 잡아둔다. 웹훅이 없으면(아이디만 있는 옛 설정 등) 아직
+// 알림을 보낼 수 없으므로 강조 대신 안내가 떠야 한다.
+test("웹훅이 없으면 - 강조 대신 설정 안내가 뜬다", async () => {
+  const { page, pageErrors } = await openPage(
+    { checkedIn: "false", time: 8 * 60 + 30 },
+    { enabled: true, channel: "@1008mjw", webhookUrl: "" }
+  );
+  try {
+    await page.waitForTimeout(2000);
+    const state = await page.evaluate(() => {
+      const banner = document.getElementById("ssafy-alert-banner");
+      return {
+        boxes: document.querySelectorAll(".ssafy-alert-box").length,
+        bannerText: banner && getComputedStyle(banner).display !== "none" ? banner.innerText : "",
+      };
+    });
+    assert.equal(pageErrors.length, 0, "페이지 에러: " + pageErrors.join(" | "));
+    assert.equal(state.boxes, 0, "설정 전에는 강조 박스를 그리지 않는다");
+    assert.match(state.bannerText, /설정을 마쳐야/, "설정 전에는 안내 배너가 떠야 한다");
   } finally {
     await page.close();
   }

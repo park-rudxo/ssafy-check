@@ -22,6 +22,8 @@
 // 사용하는 곳 (holidays.js와 같은 방식으로 전역에 붙인다)
 //   - service worker : importScripts("mattermost.js")
 //   - popup / welcome: <script src="mattermost.js"> 를 각 스크립트보다 앞에 둔다
+//   - content script : manifest 의 content_scripts.js 에서 content.js 앞에 둔다
+//                      (설정 완료 판정을 페이지 배너도 같은 함수로 해야 한다)
 
 (function (root) {
   "use strict";

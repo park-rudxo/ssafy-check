@@ -17,12 +17,17 @@
     notifyCheckin: true,
     notifyCheckout: true,
     notifyMissing: true,
+    // 연결한 Mattermost 계정의 한글 이름 후보. 이 브라우저의 주인을 "먼저
+    // 연 사람"이 아니라 이 이름으로 확정하는 데 쓴다.
+    ownerNames: [],
   };
   let mm = { ...MM_DEFAULTS };
 
   // 이 브라우저에 기억된 에듀싸피 계정(주인). 백그라운드가 정하고, 팝업은
   // 보여주고 푸는 일만 한다. { name, boundAt } 또는 null.
   let eduAccount = null;
+
+  const SSAFY_HOME = "https://edu.ssafy.com/edu/main/index.do";
 
   // offDays  : 사용자가 등록한 개인 휴무일(연차·공가 등)
   // workDays : 공휴일이지만 평일로 취급할 날 (공휴일 표가 틀렸을 때의 탈출구)
@@ -258,6 +263,18 @@
     }
   }
 
+  // 버튼으로 다시 지정할 때는 연결된 계정의 이름 후보까지 푼다.
+  //
+  // 이게 없으면 빠져나올 길이 없다. Mattermost 프로필의 이름과 edu 화면의
+  // 이름이 어떤 이유로든 다르면(표기가 다르거나, 프로필을 고쳤거나) 확장은
+  // 본인조차 "연결된 계정이 아니다"로 막아버린다. 그때 이 버튼이 곧 탈출구라,
+  // 누른 뒤에는 다시 "처음 본 계정"으로 주인을 잡는다.
+  function resetEduOwnerByUser() {
+    mm.ownerNames = [];
+    saveMattermost();
+    resetEduOwner();
+  }
+
   function saveMattermost() {
     try {
       chrome.storage.local.set({ mattermost: mm }, renderMattermost);
@@ -311,6 +328,9 @@
         .then((res) => {
           mm.webhookUrl = res.webhookUrl;
           mm.channel = res.channel;
+          // 이 브라우저의 주인을 방금 연결한 계정으로 잡기 위한 이름이다.
+          // (background.js 의 checkEduOwner 참고)
+          mm.ownerNames = Array.isArray(res.ownerNames) ? res.ownerNames : [];
           // 여기까지 왔으면 보낼 곳도 보낼 대상도 확정이다. 따로 켜게 두면
           // 연결만 해놓고 안 켠 상태로 남아 아무것도 안 오는 사람이 생긴다.
           mm.enabled = true;
@@ -321,6 +341,10 @@
           btn.disabled = false;
           cleanupArmed = false;
           renderHookCleanup("");
+          // 출석 화면을 바로 연다. 연결만 해두고 edu 를 안 연 채 자리를 뜨면
+          // 그 사이에 앉은 사람이 주인으로 잡힌다. 지금 키보드 앞에 있는
+          // 사람이 주인이 맞으므로, 여기서 바로 확정한다.
+          chrome.tabs.create({ url: SSAFY_HOME });
           setMmStatus(
             res.reused
               ? `✅ ${res.channel} 로 연결했어요. 전에 만들어 둔 웹훅을 그대로 씁니다. 테스트 메시지를 보내 확인해보세요.`
@@ -524,7 +548,7 @@
     });
 
     document.getElementById("open-ssafy").addEventListener("click", () => {
-      chrome.tabs.create({ url: "https://edu.ssafy.com/edu/main/index.do" });
+      chrome.tabs.create({ url: SSAFY_HOME });
     });
 
     document.getElementById("reload-now").addEventListener("click", () => {
@@ -639,7 +663,7 @@
     });
 
     document.getElementById("mm-provision").addEventListener("click", provisionMattermost);
-    document.getElementById("edu-owner-reset").addEventListener("click", resetEduOwner);
+    document.getElementById("edu-owner-reset").addEventListener("click", resetEduOwnerByUser);
     document.getElementById("mm-cleanup").addEventListener("click", cleanupWebhooks);
     document.getElementById("mm-test").addEventListener("click", testMattermost);
 

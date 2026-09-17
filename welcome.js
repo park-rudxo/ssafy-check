@@ -115,7 +115,15 @@
         return SsafyMattermost.provisionPersonalWebhook();
       })
       .then((res) => {
-        mm = { ...mm, webhookUrl: res.webhookUrl, channel: res.channel, enabled: true };
+        // ownerNames: 이 브라우저의 주인을 "먼저 edu 를 연 사람"이 아니라
+        // 방금 연결한 이 계정으로 확정하기 위한 이름이다.
+        mm = {
+          ...mm,
+          webhookUrl: res.webhookUrl,
+          channel: res.channel,
+          ownerNames: Array.isArray(res.ownerNames) ? res.ownerNames : [],
+          enabled: true,
+        };
         // 이 크롬이 누구 것인지도 다시 잡는다. 확장은 처음 본 에듀싸피 계정을
         // 이 브라우저의 주인으로 기억해 다른 계정의 출석은 무시하는데(남의
         // 자리에서 로그인해 체크한 알림이 자리 주인에게 가던 문제), 계정을
@@ -128,6 +136,9 @@
         return save({ mattermost: mm }).then(() => {
           btn.disabled = false;
           renderMattermost();
+          // 출석 화면을 바로 연다. 연결만 해두고 edu 를 안 연 채 자리를 뜨면
+          // 그 사이에 앉은 사람이 주인으로 잡힌다.
+          chrome.tabs.create({ url: SSAFY_HOME });
           setStatus(`${res.channel} 로 연결했어요. 이제 테스트 메시지를 보내보세요.`, "ok");
         });
       })

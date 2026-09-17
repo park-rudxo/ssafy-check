@@ -576,6 +576,21 @@ async function handOverBrowser(mine, theirs) {
 // 주인이 아닌 계정의 보고를 되돌려보낸다. 주인을 오늘 봤는지에 따라
 // "잠깐 남이 앉았다"와 "주인이 떠났다"가 갈린다.
 async function refuseOtherAccount(owner) {
+  // 쉬는 날에는 알리지도, 정리하지도 않는다.
+  //
+  // 보고 자체는 쉬는 날에도 올라온다(헛경고를 막으려면 백그라운드가 아는
+  // 상태를 최신으로 유지해야 한다). 하지만 그건 상태를 기록하는 일이고,
+  // 사람에게 무언가를 보내는 것은 별개다. 싸피는 주말에 나오지 않으므로
+  // 주말에 가는 알림은 그 자체로 헛것이다.
+  //
+  // 정리(설정 삭제)까지 함께 미루는 이유: 정리는 반드시 주인에게 먼저
+  // 알리고 지워야 한다. 알림만 막고 지우기만 하면, 주인은 설정이 사라진
+  // 것도 모르는 채 월요일을 맞는다. 하루 미루는 편이 낫다.
+  if (await isDayOff()) {
+    SsafyDebug.log("계정", "쉬는 날이라 알리지도 정리하지도 않음", { mine: owner.mine, theirs: owner.theirs });
+    return { ok: false, ignored: "day-off" };
+  }
+
   // 주인이 아직 없는데 연결된 계정도 아닌 경우. 지울 주인이 없으니 정리는
   // 하지 않고, 주인으로 잡지 않았다는 사실만 알린다.
   if (owner.notOwner) {
@@ -644,6 +659,11 @@ async function notifyAttendanceDone(kind, minutes) {
   // 여기서 걸러진 이유가 곧 "왜 메시지가 안 왔는지"의 답이라, 걸러질 때마다
   // 그 이유를 남긴다. 조건 하나하나가 조용한 실패의 후보다.
   const skip = (why) => SsafyDebug.log("done", `${kind} 알림 건너뜀`, { why, minutes });
+
+  // 쉬는 날에는 아무것도 내보내지 않는다. 출석 상태 보고는 화면 표시 조건과
+  // 무관하게 항상 올라오므로(content.js 의 reportObserved), 이 검사가 없으면
+  // 주말에 SSAFY 페이지를 잠깐 열어본 것만으로 알림이 나간다.
+  if (await isDayOff()) return skip("쉬는 날");
 
   const s = await getMattermost();
   if (!s.enabled) return skip("Mattermost 연동이 꺼져 있음");

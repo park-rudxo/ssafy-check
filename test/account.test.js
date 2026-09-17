@@ -525,3 +525,61 @@ test("다른 값이 바뀔 때는 열지 않는다", async () => {
 
   assert.deepEqual(tabs, []);
 });
+
+// ── 쉬는 날에는 아무것도 내보내지 않는다 ──────────────────────────────
+// 헛경고를 막으려고 출석 상태 보고를 화면 표시 조건보다 앞으로 옮겼다. 그래서
+// 쉬는 날에도 보고가 올라온다. 상태를 최신으로 두는 것은 맞지만, 사람에게
+// 무언가를 보내는 것은 별개다 - 싸피는 주말에 나오지 않으므로 주말에 가는
+// 알림은 그 자체로 헛것이다.
+
+// 오늘을 개인 휴무일로 등록해 쉬는 날로 만든다 (주말·공휴일과 같은 취급).
+function makeDayOff(store, sandbox) {
+  store.dayOff = { offDays: [sandbox.todayStr()], workDays: [] };
+}
+
+test("쉬는 날에는 완료 알림을 보내지 않는다", async () => {
+  const { sandbox, store, posts } = loadBackground();
+  makeDayOff(store, sandbox);
+
+  await run(() => sandbox.handleAttendanceObserved({ checkinMin: 8 * 60 + 16, checkoutMin: null, account: "홍길동" }));
+
+  assert.equal(sent(posts, /체크 완료/).length, 0, "주말에 페이지를 잠깐 열어본 것만으로 알림이 가면 안 된다");
+  // 상태는 그대로 기록해야 한다. 이걸 막으면 헛경고 수정이 도로 깨진다.
+  assert.equal(store.attendance.pageCheckinMin, 8 * 60 + 16, "보내지 않는 것과 모르는 것은 다르다");
+});
+
+test("쉬는 날에는 다른 계정 안내도 보내지 않는다", async () => {
+  const { sandbox, store, posts, notes } = loadBackground();
+  store.eduAccount = { name: "홍길동", boundAt: sandbox.todayStr(), lastSeenAt: sandbox.todayStr() };
+  makeDayOff(store, sandbox);
+
+  await run(() => sandbox.handleAttendanceObserved({ checkinMin: 8 * 60 + 16, checkoutMin: null, account: "김철수" }));
+
+  assert.equal(sent(posts, /다른 계정/).length, 0);
+  assert.equal(notes.length, 0, "그 자리에 앉은 사람에게도 주말에 알릴 것이 없다");
+  assert.equal(store.eduAccount.name, "홍길동", "남의 출석을 내 것으로 기록하지도 않는다");
+});
+
+test("쉬는 날에는 떠난 자리 정리도 미룬다", async () => {
+  // 알림만 막고 지우기만 하면, 주인은 설정이 사라진 것도 모른 채 월요일을
+  // 맞는다. 정리는 반드시 먼저 알리고 지워야 하므로 하루 미루는 편이 낫다.
+  const { sandbox, store, posts } = loadBackground();
+  store.eduAccount = { name: "홍길동", boundAt: YESTERDAY, lastSeenAt: YESTERDAY };
+  makeDayOff(store, sandbox);
+
+  await run(() => sandbox.handleAttendanceObserved(남의출석));
+
+  assert.notEqual(store.mattermost, undefined, "쉬는 날에 조용히 지우면 안 된다");
+  assert.notEqual(store.eduAccount, undefined);
+  assert.equal(sent(posts, /지웠어요/).length, 0);
+});
+
+test("쉬는 날이 아니면 지금까지처럼 보낸다", async () => {
+  // 위 검사가 너무 넓게 걸려 평일까지 조용해지면 확장이 통째로 멎는다.
+  const { sandbox, store, posts } = loadBackground();
+  store.dayOff = { offDays: [], workDays: [sandbox.todayStr()] }; // 오늘은 반드시 일하는 날
+
+  await run(() => sandbox.handleAttendanceObserved({ checkinMin: 8 * 60 + 16, checkoutMin: null, account: "홍길동" }));
+
+  assert.equal(sent(posts, /입실 체크 완료/).length, 1);
+});

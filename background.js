@@ -228,6 +228,26 @@ const MM_WARN_CHECKIN_MINS = [8 * 60 + 50, 8 * 60 + 55, 8 * 60 + 58];
 const MM_WARN_CHECKOUT_MINS = [18 * 60, 18 * 60 + 5, 18 * 60 + 15, 18 * 60 + 30];
 const MM_WARN_PREFIX = "ssafy-mm-warn-";
 
+// 알람은 예정 시각을 놓쳤다고 사라지지 않는다. PC가 절전이었거나 크롬이 꺼져
+// 있었으면, 다시 깨어나는 순간 밀린 알람이 한꺼번에 울린다. 그때 예정 시각만
+// 믿고 보내면 09:30에 "09:00까지 2분/5분/10분 남았습니다"가 한꺼번에(게다가
+// 순서도 뒤죽박죽으로) 날아온다 - 이미 입실을 마친 뒤라도, 브라우저가 방금
+// 켜져 아직 출석 위젯을 못 읽었으면 "안 눌렀다"로 보이기 때문이다.
+// 그래서 보내기 직전에 지금 시각을 다시 보고, 예정보다 이만큼 넘게 늦은
+// 알람은 버린다. 놓친 경고를 뒤늦게 보내봐야 알려주는 게 없다.
+const MM_WARN_LATE_TOLERANCE_MIN = 2;
+
+function minutesOfDay(d = new Date()) {
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+// 지금 보내도 되는 알람인가. 예정 시각 언저리(1분 이르거나 몇 분 늦거나)일
+// 때만 참이다. 날이 바뀌어 울린 알람은 차이가 크게 음수가 되어 걸러진다.
+function isWarnOnTime(scheduledMin, nowMin) {
+  const late = nowMin - scheduledMin;
+  return late >= -1 && late <= MM_WARN_LATE_TOLERANCE_MIN;
+}
+
 async function getMattermost() {
   const { mattermost } = await chrome.storage.local.get("mattermost");
   return { ...MM_DEFAULTS, ...(mattermost || {}) };
@@ -335,6 +355,9 @@ const ATTENDANCE_DEFAULT = {
   checkoutMin: null,
   pageCheckinMin: null, // 출석 위젯에 찍힌 시각 (서버 기준, 더 신뢰도 높음)
   pageCheckoutMin: null,
+  // 위젯에 시각이 안 찍혀도 "정상 출석" 문구가 보이면 입실한 것이다.
+  // 시각만 믿으면 문구만 있는 화면에서 "입실 안 함"으로 오판한다.
+  pageCheckedIn: false,
 };
 
 function numOrNull(v) {
@@ -648,20 +671,26 @@ async function handleAttendanceObserved(msg) {
   const co = numOrNull(msg.checkoutMin);
 
   // 위젯에 찍힌 시각도 결국 "지금 로그인한 사람"의 것이다. 주인이 아니면
-  // 그 사람의 출석 상태를 주인의 오늘치로 덮어쓰면 안 된다.
+  // 그 사람의 출석 상태를 주인의 오늘치로 덮어쓰면 안 된다. 아래에서 무엇을
+  // 기록하든 그 전에 걸러야 한다.
   const owner = await checkEduOwner(msg.account);
   if (!owner.ok) return refuseOtherAccount(owner);
 
+  // 시각이 있으면 당연히 입실한 것이고, 시각이 없어도 페이지가 입실했다고
+  // 하면(= "정상 출석" 문구) 그대로 믿는다.
+  const inDone = ci != null || msg.checkedIn === true;
   const a = await getAttendance();
+  const same = a.pageCheckinMin === ci && a.pageCheckoutMin === co && a.pageCheckedIn === inDone;
   SsafyDebug.log("보고", "위젯 관찰 도착", {
-    입실: ci == null ? "없음" : hhmm(ci),
+    입실: ci == null ? (inDone ? "시각 없이 정상 출석" : "없음") : hhmm(ci),
     퇴실: co == null ? "없음" : hhmm(co),
-    바뀜: !(a.pageCheckinMin === ci && a.pageCheckoutMin === co),
+    바뀜: !same,
   });
-  if (a.pageCheckinMin === ci && a.pageCheckoutMin === co) return { ok: true };
+  if (same) return { ok: true };
   a.date = todayStr();
   a.pageCheckinMin = ci;
   a.pageCheckoutMin = co;
+  a.pageCheckedIn = inDone;
   await chrome.storage.local.set({ attendance: a });
 
   // 위젯에 시각이 찍혔다는 건 서버가 출석을 받았다는 뜻이라, 클릭 감지보다
@@ -674,9 +703,16 @@ async function handleAttendanceObserved(msg) {
   return { ok: true };
 }
 
-// 미체크 경고는 일부러 매번 보낸다(점점 촘촘해지는 리마인더라 중복이 아님).
+// 미체크 경고는 아직 안 눌렀으면 예정된 시각마다 다시 보낸다(점점 촘촘해지는
+// 리마인더라 중복이 아니다). 대신 "같은 시각의 경고"는 하루에 한 번뿐이고,
+// 예정 시각을 한참 넘겨 울린 알람은 아예 보내지 않는다.
 async function handleMattermostWarning(totalMin) {
   const skip = (why) => SsafyDebug.log("경고", `${hhmm(totalMin)} 경고 건너뜀`, { why });
+
+  // 밀렸다가 뒤늦게 울린 알람은 여기서 끊는다. 이 검사가 없으면 절전에서
+  // 깨어난 직후 지나간 경고들이 한꺼번에 쏟아진다.
+  const nowMin = minutesOfDay();
+  if (!isWarnOnTime(totalMin, nowMin)) return skip(`예정보다 늦게 울림 (지금 ${hhmm(nowMin)})`);
 
   if (await isDayOff()) return skip("쉬는 날"); // 주말·공휴일·개인 휴무일에는 경고하지 않는다
 
@@ -689,13 +725,21 @@ async function handleMattermostWarning(totalMin) {
   SsafyDebug.log("경고", `${hhmm(totalMin)} 판단 시작`, {
     클릭입실: a.checkinMin == null ? "없음" : hhmm(a.checkinMin),
     클릭퇴실: a.checkoutMin == null ? "없음" : hhmm(a.checkoutMin),
-    위젯입실: a.pageCheckinMin == null ? "없음" : hhmm(a.pageCheckinMin),
+    위젯입실: a.pageCheckinMin == null ? (a.pageCheckedIn ? "시각 없이 정상 출석" : "없음") : hhmm(a.pageCheckinMin),
     위젯퇴실: a.pageCheckoutMin == null ? "없음" : hhmm(a.pageCheckoutMin),
   });
+  // 경고는 일부러 여러 번 보내지만, "같은 시각의 경고"가 두 번 갈 이유는
+  // 없다. 알람이 어쩌다 두 번 울려도 여기서 한 번으로 눌러준다.
+  if (!(await markSentOnce(`warn-${totalMin}`))) return skip("이 시각 경고는 오늘 이미 보냄");
+
   if (MM_WARN_CHECKIN_MINS.includes(totalMin)) {
-    // 위젯에 입실 시각이 찍혀 있으면 폰으로 눌렀더라도 입실한 것이다.
-    if (a.pageCheckinMin != null || a.checkinMin != null) return;
-    const left = CHECK_IN_MIN - totalMin;
+    // 위젯이 입실했다고 하면 폰으로 눌렀더라도 입실한 것이다. 시각이 안
+    // 찍히고 "정상 출석" 문구만 있는 경우까지 포함한다.
+    if (a.pageCheckedIn || a.pageCheckinMin != null || a.checkinMin != null) return;
+    // 남은 시간은 예정 시각이 아니라 지금 시각에서 센다. 알람이 1~2분 늦게
+    // 울렸을 때 문구가 실제와 어긋나지 않도록.
+    const left = CHECK_IN_MIN - nowMin;
+    if (left <= 0) return skip("이미 09:00이 지남");
     await postToMattermost(`🚨 **아직 입실 체크를 안 했어요!** 09:00까지 ${left}분 남았습니다.\n${SSAFY_HOME}`, s);
     return;
   }
@@ -713,7 +757,8 @@ async function handleMattermostWarning(totalMin) {
   }
 
   if (a.checkoutMin != null && a.checkoutMin >= CHECK_OUT_MIN) return; // 클릭 기록으로 확인
-  const late = totalMin - CHECK_OUT_MIN;
+  // 알람이 18:00보다 몇 초 일찍 울려 -1분이 나오는 일이 없도록 바닥을 둔다.
+  const late = Math.max(0, nowMin - CHECK_OUT_MIN);
   const when = late === 0 ? "방금 18:00이 됐어요." : `18:00에서 ${late}분 지났어요.`;
   await postToMattermost(
     `🚨 **아직 퇴실 체크를 안 했어요!** ${when} 지금 누르지 않으면 조퇴 처리될 수 있어요.\n${SSAFY_HOME}`,

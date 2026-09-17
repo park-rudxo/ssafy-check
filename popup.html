@@ -453,6 +453,12 @@
                주인이 아닌 계정의 출석은 무시한다. 잘못 잡혔으면 여기서 푼다. -->
           <div class="time-hint" id="edu-owner"></div>
           <button id="edu-owner-reset" class="btn-link" style="display: none">👤 이 브라우저의 주인 다시 지정하기</button>
+          <!-- 자리를 옮길 때마다 웹훅이 하나씩 늘던 시절에 만들어진 것들을
+               회수한다. 지금은 있는 것을 다시 쓰므로 더 늘지 않지만, 이미
+               뿌려진 것은 여기서만 지울 수 있다. 아직 그 웹훅을 쓰는 PC가
+               있으면 그쪽 알림이 멎으므로 두 번 눌러야 지워진다. -->
+          <div class="time-hint" id="mm-hooks"></div>
+          <button id="mm-cleanup" class="btn-link">🧹 다른 PC에 남은 내 웹훅 정리하기</button>
           <div class="mm-warn">
             ⚠️ <b>데스크탑 앱 로그인은 인식되지 않아요.</b>
             반드시 <b>이 크롬 브라우저에서 웹페이지(meeting.ssafy.com)로 로그인</b>한 뒤 연결하세요.

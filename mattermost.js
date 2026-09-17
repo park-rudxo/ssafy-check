@@ -113,12 +113,13 @@
     if (root.SsafyDebug && root.SsafyDebug.log) root.SsafyDebug.log("api", ...args);
   }
 
-  async function api(path, body) {
-    dlog("요청", { path, method: body === undefined ? "GET" : "POST" });
+  async function api(path, body, method) {
+    const verb = method || (body === undefined ? "GET" : "POST");
+    dlog("요청", { path, method: verb });
     let res;
     try {
       res = await fetch(API_BASE + path, {
-        method: body === undefined ? "GET" : "POST",
+        method: verb,
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
@@ -200,7 +201,90 @@
     return ts.id;
   }
 
-  // 성공하면 { webhookUrl, channel } 을 돌려준다. 실패는 throw로 알린다.
+  // ── 이미 만들어 둔 내 웹훅 ──────────────────────────────────────────
+  // 예전에는 연결할 때마다 새 웹훅을 만들었다. 싸피는 자리 이동이 잦아서 자리를
+  // 옮길 때마다 하나씩 늘어나고, 그 토큰은 떠나온 PC에 그대로 남는다. 다섯 대를
+  // 거치면 내 계정 아래에 웹훅이 다섯 개다. 이미 있는 것을 다시 쓰면 더 늘지
+  // 않는다.
+  //
+  // 서버가 주는 목록에는 권한에 따라 남의 것이 섞여 올 수 있다. 반드시 user_id
+  // 로 내 것인지 확인한다 - 남의 웹훅을 물려받으면 내 알림이 그 사람 이름으로
+  // 나가고, 지우는 쪽에서는 남의 것을 지우게 된다. 이 확장이 만든 것인지도
+  // display_name 으로 같이 본다. 사람이 손으로 만든 웹훅은 건드리지 않는다.
+  function isMyHook(hook, meId) {
+    return !!(hook && hook.id && hook.user_id === meId && hook.display_name === HOOK_NAME);
+  }
+
+  async function listMyHooks(teamId, meId) {
+    const hooks = await api(`/hooks/incoming?team_id=${encodeURIComponent(teamId)}&per_page=200`);
+    return (Array.isArray(hooks) ? hooks : []).filter((h) => isMyHook(h, meId));
+  }
+
+  // 웹훅 주소에서 id 만 떼어낸다. 주소 모양이 아니면 빈 문자열.
+  function hookIdOf(url) {
+    const s = typeof url === "string" ? url.trim() : "";
+    return s.startsWith(HOOK_BASE) ? s.slice(HOOK_BASE.length) : "";
+  }
+
+  // 내가 이 확장으로 만든 웹훅 중 지금 쓰는 것 하나만 남기고 지운다.
+  // dryRun 이면 세어보기만 하고 아무것도 지우지 않는다.
+  //   { found, extras, deleted, failed, keptId }
+  //
+  // 이미 뿌려진 웹훅을 회수할 방법은 이것뿐이다. 다만 아직 그 웹훅을 들고 있는
+  // PC가 있으면 그 PC의 알림은 전송만 실패하며 조용히 멎는다. 그래서 이 함수는
+  // 스스로 도는 일이 없고, 부르는 쪽이 그 사실을 먼저 알린 뒤 사용자가 직접
+  // 누를 때만 불러야 한다.
+  async function cleanupMyWebhooks(keepUrl, opts) {
+    const dryRun = !!(opts && opts.dryRun);
+    const me = await api("/users/me");
+    if (!me || !me.id) throw new Error("내 계정 정보를 읽지 못했어요.");
+
+    // 팀을 하나만 보면 다른 팀에 걸어둔 웹훅이 조용히 남는다. 살아 있는 팀을
+    // 전부 훑는다 (보통 한 개다).
+    const teams = await api("/users/me/teams");
+    const live = (Array.isArray(teams) ? teams : []).filter((t) => t && t.id && !t.delete_at);
+    if (!live.length) throw new Error("소속된 팀을 찾지 못했어요.");
+
+    // id 로 모은다. 서버가 팀 필터를 무시하고 같은 웹훅을 여러 번 주더라도,
+    // 같은 것을 두 번 지우려다 두 번째가 404로 떨어져 "실패 1건"으로 보이면
+    // 안 된다.
+    const byId = new Map();
+    for (const t of live) {
+      try {
+        for (const h of await listMyHooks(t.id, me.id)) byId.set(h.id, h);
+      } catch (e) {
+        dlog("이 팀의 웹훅 목록을 읽지 못했다", { team: t.name, error: String(e && e.message ? e.message : e) });
+      }
+    }
+    const mine = [...byId.values()];
+
+    // 남길 것을 정한다. 지금 쓰는 웹훅이 목록에 있으면 그것을, 없으면(다른
+    // 계정 것이거나 이미 지워졌으면) 가장 먼저 만든 것을 남긴다. 하나는 반드시
+    // 남겨야 지금 이 PC의 알림까지 끊기지 않는다.
+    const inUse = hookIdOf(keepUrl);
+    const oldest = mine.slice().sort((a, b) => (a.create_at || 0) - (b.create_at || 0))[0];
+    const keepId = mine.some((h) => h.id === inUse) ? inUse : oldest ? oldest.id : "";
+
+    const extras = mine.filter((h) => h.id !== keepId);
+    let deleted = 0;
+    let failed = 0;
+    if (!dryRun) {
+      for (const h of extras) {
+        try {
+          await api(`/hooks/incoming/${encodeURIComponent(h.id)}`, undefined, "DELETE");
+          deleted++;
+        } catch (e) {
+          failed++;
+          dlog("웹훅을 지우지 못했다", { hookId: h.id, error: String(e && e.message ? e.message : e) });
+        }
+      }
+    }
+
+    dlog("웹훅 정리", { found: mine.length, extras: extras.length, deleted, failed, dryRun });
+    return { found: mine.length, extras: extras.length, deleted, failed, keptId: keepId };
+  }
+
+  // 성공하면 { webhookUrl, channel, reused } 를 돌려준다. 실패는 throw로 알린다.
   // 확장 페이지(팝업/설치 화면)에서 호출해야 한다 - 서비스 워커에는 이 호스트
   // 권한을 사용자 동작 없이 받을 방법이 없다.
   async function provisionPersonalWebhook() {
@@ -215,6 +299,24 @@
 
     const channelId = await ensureHomeChannel(team.id);
 
+    // 이미 만들어 둔 것이 있으면 그걸 쓴다. 방금 확인한 채널에 걸린 것만
+    // 물려받는다 - 다른 채널에 걸린 웹훅은 그 채널이 아직 살아 있는지 알 수
+    // 없고, 없어진 채널의 웹훅을 물려받으면 전송이 조용히 실패한다.
+    // channel_locked 인 웹훅도 거른다. 잠긴 웹훅으로는 DM을 보낼 수 없다.
+    //
+    // 목록을 못 읽는 계정도 있으므로(권한 등), 실패하면 예전처럼 새로 만드는
+    // 쪽으로 조용히 물러난다. 여기서 막히면 설정 자체를 못 하게 된다.
+    try {
+      const mine = await listMyHooks(team.id, me.id);
+      const reusable = mine.find((h) => h.channel_id === channelId && !h.channel_locked);
+      if (reusable) {
+        dlog("이미 있는 개인 웹훅을 다시 쓴다", { username: me.username, hookId: reusable.id, 가진개수: mine.length });
+        return { webhookUrl: hookUrl(reusable.id), channel: "@" + me.username, reused: true };
+      }
+    } catch (e) {
+      dlog("웹훅 목록을 읽지 못해 새로 만든다", { error: String(e && e.message ? e.message : e) });
+    }
+
     const hook = await api("/hooks/incoming", {
       channel_id: channelId,
       // 잠기면 payload의 @아이디로 DM을 보낼 수 없게 된다. 이 확장은 DM으로만
@@ -226,7 +328,7 @@
     if (!hook || !hook.id) throw new Error("웹훅을 만들지 못했어요.");
 
     dlog("개인 웹훅 발급 완료", { username: me.username, team: team.name, channelId, hookId: hook.id });
-    return { webhookUrl: hookUrl(hook.id), channel: "@" + me.username };
+    return { webhookUrl: hookUrl(hook.id), channel: "@" + me.username, reused: false };
   }
 
   root.SsafyMattermost = {
@@ -237,6 +339,8 @@
     isConfigured,
     pickWebhookUrl,
     provisionPersonalWebhook,
+    cleanupMyWebhooks,
+    hookIdOf,
     ERR_EMPTY,
     ERR_SHAPE,
   };

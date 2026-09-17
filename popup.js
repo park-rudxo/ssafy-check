@@ -216,6 +216,7 @@
       : "";
 
     renderEduOwner();
+    renderHookCleanup();
 
     // 예전 버전에서 설정이 덜 된 채로 켜둔 값이 남아 있을 수 있다. 조용히
     // 안 오는 것보다 이유를 알려주는 편이 낫다.
@@ -317,11 +318,91 @@
           // 예전 주인이 남아 있으면 새 주인의 출석이 전부 무시된다.
           resetEduOwner();
           btn.disabled = false;
-          setMmStatus(`✅ ${res.channel} 로 연결했어요. 테스트 메시지를 보내 확인해보세요.`, "ok");
+          cleanupArmed = false;
+          renderHookCleanup("");
+          setMmStatus(
+            res.reused
+              ? `✅ ${res.channel} 로 연결했어요. 전에 만들어 둔 웹훅을 그대로 씁니다. 테스트 메시지를 보내 확인해보세요.`
+              : `✅ ${res.channel} 로 연결했어요. 테스트 메시지를 보내 확인해보세요.`,
+            "ok"
+          );
         })
         .catch((e) => {
           btn.disabled = false;
           setMmStatus(e && e.message ? e.message : "자동 설정에 실패했어요.", e && e.blocked ? "" : "err");
+        });
+    });
+  }
+
+  // ── 다른 PC에 남은 내 웹훅 정리 ──────────────────────────────────────
+  // 연결할 때마다 새 웹훅을 만들던 시절에 자리를 옮겨 다닌 만큼 웹훅이 쌓였다.
+  // 지금은 있는 것을 다시 쓰므로 더 늘지 않지만, 이미 만들어진 것은 여기서만
+  // 회수할 수 있다.
+  //
+  // 두 번 눌러야 지워진다. 아직 그 웹훅을 들고 있는 PC가 있으면 그 PC의 알림은
+  // 전송만 실패하며 조용히 멎기 때문에, 몇 개가 지워지는지 먼저 보여주고
+  // 사용자가 그 사실을 알고 한 번 더 누르게 한다.
+  let cleanupArmed = false;
+
+  function renderHookCleanup(text) {
+    const line = document.getElementById("mm-hooks");
+    const btn = document.getElementById("mm-cleanup");
+    if (!line || !btn) return;
+    // 연결이 끝나기 전에는 지울 것도, 남길 것도 정할 수 없다.
+    const ready = SsafyMattermost.isConfigured(mm);
+    // 인자를 안 주면 지금 문구는 그대로 두고 버튼 상태만 다시 그린다.
+    if (text !== undefined) line.textContent = text;
+    line.style.display = line.textContent ? "block" : "none";
+    btn.style.display = ready ? "block" : "none";
+    btn.textContent = cleanupArmed ? "⚠️ 한 번 더 누르면 지웁니다" : "🧹 다른 PC에 남은 내 웹훅 정리하기";
+  }
+
+  function cleanupWebhooks() {
+    const btn = document.getElementById("mm-cleanup");
+    btn.disabled = true;
+    const armed = cleanupArmed;
+    setMmStatus(armed ? "지우는 중..." : "내 웹훅을 세어보는 중...");
+
+    ensureOriginPermission().then((perm) => {
+      if (!perm.ok) {
+        btn.disabled = false;
+        setMmStatus(perm.error, "err");
+        return;
+      }
+      SsafyMattermost.cleanupMyWebhooks(mm.webhookUrl, { dryRun: !armed })
+        .then((res) => {
+          btn.disabled = false;
+          if (!armed) {
+            if (!res.extras) {
+              cleanupArmed = false;
+              renderHookCleanup(`내 웹훅 ${res.found}개 — 지금 쓰는 것 하나뿐이라 정리할 게 없어요.`);
+              setMmStatus("✅ 이미 깨끗해요.", "ok");
+              return;
+            }
+            // 여기서 멈추고 무엇이 지워지는지 먼저 보여준다.
+            cleanupArmed = true;
+            renderHookCleanup(
+              `내 웹훅 ${res.found}개를 찾았어요. 지금 쓰는 1개만 남기고 ${res.extras}개를 지웁니다. ` +
+                `그 웹훅을 아직 쓰는 PC가 있다면 그 PC의 알림은 멎고, 거기서 다시 연결해야 해요.`
+            );
+            setMmStatus(`${res.extras}개를 지우려면 한 번 더 누르세요.`);
+            return;
+          }
+
+          cleanupArmed = false;
+          renderHookCleanup(`내 웹훅 ${res.found - res.deleted}개 남음.`);
+          setMmStatus(
+            res.failed
+              ? `${res.deleted}개를 지웠고 ${res.failed}개는 실패했어요. 잠시 후 다시 눌러주세요.`
+              : `✅ ${res.deleted}개를 지웠어요. 지금 쓰는 웹훅은 그대로예요.`,
+            res.failed ? "err" : "ok"
+          );
+        })
+        .catch((e) => {
+          btn.disabled = false;
+          cleanupArmed = false;
+          renderHookCleanup("");
+          setMmStatus(e && e.message ? e.message : "웹훅을 정리하지 못했어요.", e && e.blocked ? "" : "err");
         });
     });
   }
@@ -558,6 +639,7 @@
 
     document.getElementById("mm-provision").addEventListener("click", provisionMattermost);
     document.getElementById("edu-owner-reset").addEventListener("click", resetEduOwner);
+    document.getElementById("mm-cleanup").addEventListener("click", cleanupWebhooks);
     document.getElementById("mm-test").addEventListener("click", testMattermost);
 
     document.getElementById("dev-enabled").addEventListener("change", (e) => {

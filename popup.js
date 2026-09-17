@@ -237,8 +237,12 @@
     const btn = document.getElementById("edu-owner-reset");
     if (!line || !btn) return;
     const name = eduAccount && eduAccount.name ? eduAccount.name : "";
+    // 자동 정리 규칙도 같이 적는다. 어느 날 갑자기 설정이 비어 있는 것을
+    // 보고 "확장이 풀렸다"고 오해하지 않으려면, 그런 일이 일어난다는 것을
+    // 미리 알고 있어야 한다.
     line.textContent = name
-      ? `이 브라우저의 주인: ${name}님 — 다른 계정으로 로그인해 체크한 출석은 알리지 않아요.`
+      ? `이 브라우저의 주인: ${name}님 — 다른 계정으로 로그인해 체크한 출석은 알리지 않아요. ` +
+        `주인이 하루 동안 한 번도 안 보이는데 다른 계정이 쓰면, 이 PC에 남은 설정을 자동으로 지웁니다.`
       : "이 브라우저의 주인: 아직 없음 — edu.ssafy.com 을 처음 여는 계정을 주인으로 기억합니다.";
     btn.style.display = name ? "block" : "none";
   }

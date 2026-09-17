@@ -213,8 +213,12 @@ function loadWithServer(opts) {
         return json(server.hooks);
       }
       if (path === "/hooks/incoming" && method === "POST") {
-        const made = { id: "new" + (server.created.length + 1) };
-        server.created.push(JSON.parse(init.body));
+        const body = JSON.parse(init.body);
+        const made = { id: "new" + (server.created.length + 1), user_id: server.me.id, ...body };
+        server.created.push(body);
+        // 만든 것을 서버가 그대로 들고 있어야 "다시 연결하면 그걸 쓴다"를
+        // 한 서버 위에서 확인할 수 있다.
+        server.hooks.push(made);
         return json(made);
       }
       const del = /^\/hooks\/incoming\/(.+)$/.exec(path);
@@ -454,4 +458,22 @@ test("웹훅을 물려받을 때도 이름이 실려 온다", async () => {
 
   assert.equal(res.reused, true);
   assert.deepEqual(names(res.ownerNames), ["박경태[서울_3반]"], "다시 쓰는 경로에서 빠지면 그쪽만 예전처럼 동작한다");
+});
+
+test("여러 번 연결해도 웹훅이 하나로 유지된다", async () => {
+  // 한 번의 재사용이 되는 것과, 몇 번을 다시 연결해도 늘지 않는 것은 다른
+  // 얘기다. 실제로 쌓인 경위가 "기기를 옮기고 · 설정을 다시 하고 · 테스트하고"
+  // 였으므로, 반복에도 하나로 유지되는지를 따로 못 박는다.
+  const { MM, server } = loadWithServer({ hooks: [] });
+
+  const first = await MM.provisionPersonalWebhook();
+  assert.equal(server.created.length, 1, "처음에는 만들어야 한다");
+  assert.equal(first.reused, false);
+
+  const second = await MM.provisionPersonalWebhook();
+  const third = await MM.provisionPersonalWebhook();
+
+  assert.equal(server.created.length, 1, "두 번째부터는 하나도 더 만들면 안 된다");
+  assert.equal(second.reused, true);
+  assert.equal(third.webhookUrl, first.webhookUrl, "매번 같은 웹훅이어야 한다");
 });

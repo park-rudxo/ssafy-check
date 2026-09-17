@@ -156,8 +156,39 @@ async function scheduleAutoOpen() {
 
 // 설정(autoOpen)이 바뀌면 자동 열기 알람을 다시 예약한다.
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.autoOpen) scheduleAutoOpen();
+  if (area !== "local") return;
+  if (changes.autoOpen) scheduleAutoOpen();
+  if (changes.mattermost) openAttendanceAfterConnect(changes.mattermost);
 });
+
+// ── 연결이 끝나면 출석 화면을 연다 ────────────────────────────────────
+// 주인을 "먼저 edu 를 연 사람"이 아니라 연결한 계정으로 잡으려면, 연결한
+// 사람이 아직 그 자리에 있을 때 edu 를 한 번 열어둬야 한다. 지금 키보드 앞에
+// 있는 사람이 주인이 맞다.
+//
+// 이 일을 팝업에서 하면 안 된다. 팝업은 포커스를 잃는 순간 닫히고, 닫히면
+// 그 뒤의 코드가 통째로 사라진다. 실제로 팝업에서 열게 했더니 탭도 안 열리고
+// 결과 문구도 안 보이는 일이 있었다. 여기서 확실한 사실은 하나다 - 연결이
+// 됐다면 설정은 저장됐다. 그 저장을 보고 서비스 워커가 여는 편이 팝업이
+// 언제 닫히든 영향을 받지 않는다.
+//
+// 뒤에서 연다. 앞으로 띄우면 설정을 마치던 사람을 끌어내는데, content.js 는
+// 배경 탭에서도 똑같이 돌아 주인을 잡는다.
+function openAttendanceAfterConnect(change) {
+  const before = change.oldValue;
+  const after = change.newValue;
+  // 연결이 "끝나지 않음 -> 끝남"으로 넘어온 순간에만 연다. 알림 종류를 켜고
+  // 끄는 것도 같은 키를 건드리므로, 그때마다 탭이 열리면 안 된다.
+  if (!SsafyMattermost.isConfigured(after)) return;
+  if (SsafyMattermost.isConfigured(before)) return;
+
+  SsafyDebug.log("계정", "연결이 끝나 출석 화면을 연다 (주인 확정용)");
+  try {
+    chrome.tabs.create({ url: SSAFY_HOME, active: false });
+  } catch (e) {
+    /* 탭을 못 열어도 연결 자체는 끝났다. 주인은 다음에 edu 를 열 때 잡힌다. */
+  }
+}
 
 // ── Mattermost 연동 ───────────────────────────────────────────────────
 // 크롬 알림은 자리를 비우거나 크롬을 닫으면 못 보지만, Mattermost로 보내면

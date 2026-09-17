@@ -25,9 +25,12 @@ const ROOT = path.join(__dirname, "..");
 function loadBackground() {
   const posts = []; // Mattermost로 나간 메시지
   const notes = []; // 크롬 알림
+  const tabs = []; // 열린 탭
   const store = {};
 
   const listeners = { addListener() {} };
+  // 저장소 변화를 듣는 쪽은 직접 불러봐야 해서 따로 붙잡아 둔다.
+  const storageListeners = [];
   const sandbox = {
     console,
     setTimeout,
@@ -38,7 +41,11 @@ function loadBackground() {
     },
     chrome: {
       alarms: { create() {}, clear() {}, onAlarm: listeners },
-      tabs: { create() {} },
+      tabs: {
+        create(opts) {
+          tabs.push(opts);
+        },
+      },
       notifications: {
         create(id, opts) {
           notes.push(opts);
@@ -53,7 +60,11 @@ function loadBackground() {
         getURL: (p) => "chrome-extension://test/" + p,
       },
       storage: {
-        onChanged: listeners,
+        onChanged: {
+          addListener(fn) {
+            storageListeners.push(fn);
+          },
+        },
         local: {
           async get(keys) {
             const list = typeof keys === "string" ? [keys] : keys;
@@ -93,7 +104,12 @@ function loadBackground() {
     notifyMissing: true,
   };
 
-  return { sandbox, store, posts, notes };
+  // 저장소가 바뀌었다고 알린다 (크롬이 하는 일을 대신한다).
+  const notifyChanged = (changes) => {
+    for (const fn of storageListeners) fn(changes, "local");
+  };
+
+  return { sandbox, store, posts, notes, tabs, notifyChanged };
 }
 
 // 나간 메시지 본문을 한 줄로 합친다 (attachments 안에 들어 있다).
@@ -453,4 +469,59 @@ test("막았을 때 문구에는 반 정보를 빼고 이름만 쓴다", async (
   assert.equal(warn.length, 1);
   assert.match(textOf(warn[0]), /박경태님/, "'박경태[서울_3반]님' 은 읽기 나쁘다");
   assert.doesNotMatch(textOf(warn[0]), /서울_3반/);
+});
+
+// ── 연결이 끝나면 출석 화면을 연다 ────────────────────────────────────
+// 주인을 연결한 계정으로 잡으려면, 연결한 사람이 아직 그 자리에 있을 때 edu 를
+// 한 번 열어둬야 한다.
+//
+// 이 일을 팝업에서 하게 했더니 탭도 안 열리고 결과 문구도 안 보이는 일이
+// 있었다. 팝업은 포커스를 잃는 순간 닫히고, 닫히면 그 뒤의 코드가 통째로
+// 사라진다. 그래서 "설정이 저장됐다"는 사실을 보고 서비스 워커가 연다.
+
+const DONE_MM = {
+  enabled: true,
+  channel: "@hong",
+  webhookUrl: "https://meeting.ssafy.com/hooks/abcdefghijklmnop",
+};
+
+test("연결이 끝나면 출석 화면을 뒤에서 연다", async () => {
+  const { tabs, notifyChanged } = loadBackground();
+
+  notifyChanged({ mattermost: { oldValue: undefined, newValue: DONE_MM } });
+
+  assert.equal(tabs.length, 1, "주인을 확정할 기회가 이때뿐이다");
+  assert.match(tabs[0].url, /edu\.ssafy\.com/);
+  assert.equal(tabs[0].active, false, "앞으로 띄우면 설정을 마치던 사람을 끌어낸다");
+});
+
+test("알림 설정을 켜고 끄는 것으로는 탭이 열리지 않는다", async () => {
+  // mattermost 키 하나에 알림 종류까지 같이 들어 있다. 바뀔 때마다 열면
+  // 체크박스를 누를 때마다 탭이 하나씩 생긴다.
+  const { tabs, notifyChanged } = loadBackground();
+
+  notifyChanged({
+    mattermost: { oldValue: DONE_MM, newValue: { ...DONE_MM, notifyCheckin: false } },
+  });
+
+  assert.deepEqual(tabs, []);
+});
+
+test("연결이 끝나지 않은 저장은 탭을 열지 않는다", async () => {
+  const { tabs, notifyChanged } = loadBackground();
+
+  // 웹훅만 있고 받을 곳이 없는 중간 상태.
+  notifyChanged({ mattermost: { oldValue: undefined, newValue: { ...DONE_MM, channel: "" } } });
+  // 연결을 끈 경우.
+  notifyChanged({ mattermost: { oldValue: DONE_MM, newValue: { ...DONE_MM, enabled: false } } });
+
+  assert.deepEqual(tabs, []);
+});
+
+test("다른 값이 바뀔 때는 열지 않는다", async () => {
+  const { tabs, notifyChanged } = loadBackground();
+
+  notifyChanged({ eduAccount: { oldValue: undefined, newValue: { name: "홍길동" } } });
+
+  assert.deepEqual(tabs, []);
 });

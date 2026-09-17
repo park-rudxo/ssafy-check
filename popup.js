@@ -350,14 +350,9 @@
             "ok"
           );
 
-          // 출석 화면을 열어 이 자리에서 주인을 확정한다. 연결만 해두고 edu 를
-          // 안 연 채 자리를 뜨면 그 사이에 앉은 사람이 주인으로 잡힌다.
-          //
-          // active: false 가 핵심이다. 앞으로 띄우면 새 탭이 포커스를 가져가고
-          // 그 순간 팝업이 닫혀서, 방금 그린 연결 결과도 "테스트 메시지를
-          // 보내라"는 다음 단계 안내도 사람이 한 번도 못 본다. 뒤에서 열어도
-          // content.js 는 똑같이 돌아 주인을 잡는다.
-          chrome.tabs.create({ url: SSAFY_HOME, active: false });
+          // 출석 화면은 백그라운드가 연다. 설정이 저장되는 것을 보고 열기
+          // 때문에, 여기서 팝업이 닫히더라도 주인 확정은 그대로 일어난다.
+          // (background.js 의 openAttendanceAfterConnect)
         })
         .catch((e) => {
           btn.disabled = false;

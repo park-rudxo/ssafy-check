@@ -405,11 +405,20 @@
   // 이 브라우저에 연결된 주인(eduAccount.name)과 지금 화면의 계정이 다르면
   // 그 주인 이름을 돌려준다. 같거나 알 수 없으면 빈 문자열.
   function otherOwnerName() {
-    const owner = eduAccount && eduAccount.name ? String(eduAccount.name) : "";
-    if (!owner) return "";
     const here = pageAccount();
-    if (!here || here === owner) return "";
-    return owner;
+    if (!here) return "";
+
+    const owner = eduAccount && eduAccount.name ? String(eduAccount.name) : "";
+    if (owner) return here === owner ? "" : owner;
+
+    // 주인이 아직 안 잡혔어도, 연결된 Mattermost 계정의 이름을 알면 그 사람이
+    // 주인이다. 지금 앉은 사람이 그 사람이 아니면 알려줘야 한다 - 안 그러면
+    // 자기 알림이 여기로 오지 않는다는 것을 모른 채 하루를 보낸다.
+    const names = mm && Array.isArray(mm.ownerNames) ? mm.ownerNames : [];
+    if (!names.length) return "";
+    if (SsafyMattermost.matchesOwnerName(names, here)) return "";
+    // 반 정보가 붙어 있으면 이름만 띄운다 ("박경태[서울_3반]" -> "박경태").
+    return SsafyMattermost.displayOwnerName(names[0]) || names[0];
   }
 
   // ── 페이지에 표시된 출석 상태 읽기 ──────────────────────────────────

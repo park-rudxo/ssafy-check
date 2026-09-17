@@ -156,8 +156,39 @@ async function scheduleAutoOpen() {
 
 // 설정(autoOpen)이 바뀌면 자동 열기 알람을 다시 예약한다.
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.autoOpen) scheduleAutoOpen();
+  if (area !== "local") return;
+  if (changes.autoOpen) scheduleAutoOpen();
+  if (changes.mattermost) openAttendanceAfterConnect(changes.mattermost);
 });
+
+// ── 연결이 끝나면 출석 화면을 연다 ────────────────────────────────────
+// 주인을 "먼저 edu 를 연 사람"이 아니라 연결한 계정으로 잡으려면, 연결한
+// 사람이 아직 그 자리에 있을 때 edu 를 한 번 열어둬야 한다. 지금 키보드 앞에
+// 있는 사람이 주인이 맞다.
+//
+// 이 일을 팝업에서 하면 안 된다. 팝업은 포커스를 잃는 순간 닫히고, 닫히면
+// 그 뒤의 코드가 통째로 사라진다. 실제로 팝업에서 열게 했더니 탭도 안 열리고
+// 결과 문구도 안 보이는 일이 있었다. 여기서 확실한 사실은 하나다 - 연결이
+// 됐다면 설정은 저장됐다. 그 저장을 보고 서비스 워커가 여는 편이 팝업이
+// 언제 닫히든 영향을 받지 않는다.
+//
+// 뒤에서 연다. 앞으로 띄우면 설정을 마치던 사람을 끌어내는데, content.js 는
+// 배경 탭에서도 똑같이 돌아 주인을 잡는다.
+function openAttendanceAfterConnect(change) {
+  const before = change.oldValue;
+  const after = change.newValue;
+  // 연결이 "끝나지 않음 -> 끝남"으로 넘어온 순간에만 연다. 알림 종류를 켜고
+  // 끄는 것도 같은 키를 건드리므로, 그때마다 탭이 열리면 안 된다.
+  if (!SsafyMattermost.isConfigured(after)) return;
+  if (SsafyMattermost.isConfigured(before)) return;
+
+  SsafyDebug.log("계정", "연결이 끝나 출석 화면을 연다 (주인 확정용)");
+  try {
+    chrome.tabs.create({ url: SSAFY_HOME, active: false });
+  } catch (e) {
+    /* 탭을 못 열어도 연결 자체는 끝났다. 주인은 다음에 edu 를 열 때 잡힌다. */
+  }
+}
 
 // ── Mattermost 연동 ───────────────────────────────────────────────────
 // 크롬 알림은 자리를 비우거나 크롬을 닫으면 못 보지만, Mattermost로 보내면
@@ -173,6 +204,9 @@ const MM_DEFAULTS = {
   notifyCheckin: true,
   notifyCheckout: true,
   notifyMissing: true,
+  // 연결한 Mattermost 계정의 한글 이름 후보. 이 브라우저의 주인을 "먼저 연
+  // 사람"이 아니라 이 이름으로 확정하는 데 쓴다. (mattermost.js 참고)
+  ownerNames: [],
 };
 
 // 메시지 카드에 붙일 라벨. 웹훅은 만든 사람(=본인) 계정으로 글을 쓰기 때문에
@@ -336,6 +370,14 @@ function accountName(v) {
   return typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, 20) : "";
 }
 
+// 연결한 Mattermost 계정의 이름 칸. 반 정보가 붙어 오기도 한다
+// ("박경태[서울_3반]"). 비어 있으면(영문 아이디뿐이거나 아직 연결 전) 이름으로
+// 주인을 가릴 근거가 없다는 뜻이다. 맞추는 규칙은 mattermost.js 에 있다.
+async function expectedOwnerNames() {
+  const s = await getMattermost();
+  return Array.isArray(s.ownerNames) ? s.ownerNames.filter(Boolean) : [];
+}
+
 // 보고에 실린 계정이 이 브라우저 주인의 것인지 본다.
 //   { ok: true }                     - 주인이거나, 판단할 근거가 없음
 //   { ok: false, mine, theirs }      - 다른 사람의 출석이다
@@ -350,6 +392,17 @@ async function checkEduOwner(reported) {
   const today = todayStr();
   const acct = await getEduAccount();
   if (!acct.name) {
+    // 주인이 아직 없다. 연결한 Mattermost 계정의 이름을 알면 그것이 주인이다 -
+    // 웹훅은 본인이 로그인해서 만든 것이기 때문이다. 지금 화면의 사람이 그
+    // 이름이 아니면, 연결만 해두고 아직 edu 를 열지 않은 사이에 다른 사람이
+    // 앉은 것이다. 여기서 주인으로 기억해버리면 정작 본인의 출석이 그 뒤로
+    // 계속 "남의 출석"으로 무시된다.
+    const expected = await expectedOwnerNames();
+    if (expected.length && !SsafyMattermost.matchesOwnerName(expected, name)) {
+      SsafyDebug.log("계정", "연결된 계정이 아니라 주인으로 잡지 않음", { expected, name });
+      // 문구에는 반 정보를 뺀 이름만 쓴다. "박경태[서울_3반]님" 은 읽기 나쁘다.
+      return { ok: false, mine: SsafyMattermost.displayOwnerName(expected[0]) || expected[0], theirs: name, notOwner: true };
+    }
     await chrome.storage.local.set({ eduAccount: { name, boundAt: today, lastSeenAt: today } });
     SsafyDebug.log("계정", "이 브라우저의 주인으로 기억함", { name });
     return { ok: true };
@@ -395,6 +448,36 @@ async function warnEduOwnerMismatch(mine, theirs) {
       `이 크롬에 연결된 알림은 **${mine}**님 것인데, 지금 edu.ssafy.com 에는 **${theirs}**님이 로그인해 있어요.\n` +
       `방금 감지된 입실/퇴실은 ${theirs}님의 것이라 "완료"로 알리지 않았습니다. ` +
       `**${mine}님의 오늘 출석은 아직 그대로**이니 직접 확인하세요.\n${SSAFY_HOME}`,
+    s
+  );
+}
+
+// 연결은 해뒀는데 주인이 아직 안 잡힌 브라우저에서 다른 사람이 보일 때.
+// 조용히 넘기면 주인은 "왜 아무 알림도 안 오지"만 남고, 지금 앉은 사람은
+// 자기 알림이 여기로 오지 않는다는 것을 모른다. 하루 한 번만 알린다.
+async function warnNotOwnerYet(mine, theirs) {
+  if (!(await markSentOnce("edu-not-owner-yet"))) return;
+
+  try {
+    chrome.notifications.create("ssafy-not-owner-" + Date.now(), {
+      type: "basic",
+      iconUrl: "icons/icon128.png",
+      title: "이 크롬은 다른 사람의 출석 알리미예요",
+      message: `이 크롬에 연결된 알림은 ${mine}님 것이라 ${theirs}님의 출석은 알리지 않습니다. 내 알림을 받으려면 내 크롬에 확장을 설치해 연결하세요.`,
+      priority: 2,
+    });
+  } catch (e) {
+    /* 알림 권한이 없어도 아래 Mattermost 쪽은 보낸다 */
+  }
+
+  const s = await getMattermost();
+  if (!s.enabled || !SsafyMattermost.isValidTarget(s.channel)) return;
+  await postToMattermost(
+    `👤 **아직 이 크롬에서 ${mine}님을 본 적이 없어요**\n` +
+      `연결은 끝났는데 edu.ssafy.com 에는 **${theirs}**님이 로그인해 있어요. ` +
+      `연결한 계정이 **${mine}**님이라, ${theirs}님을 이 브라우저의 주인으로 잡지 않고 그 출석도 알리지 않았습니다.\n` +
+      `**${mine}님이 그 PC에서 한 번 출석 화면을 열면** 주인으로 잡히고 평소대로 동작합니다. ` +
+      `이름이 실제와 다르게 잡혔다면 팝업의 **👤 이 브라우저의 주인 다시 지정하기**로 푸세요.\n${SSAFY_HOME}`,
     s
   );
 }
@@ -470,6 +553,12 @@ async function handOverBrowser(mine, theirs) {
 // 주인이 아닌 계정의 보고를 되돌려보낸다. 주인을 오늘 봤는지에 따라
 // "잠깐 남이 앉았다"와 "주인이 떠났다"가 갈린다.
 async function refuseOtherAccount(owner) {
+  // 주인이 아직 없는데 연결된 계정도 아닌 경우. 지울 주인이 없으니 정리는
+  // 하지 않고, 주인으로 잡지 않았다는 사실만 알린다.
+  if (owner.notOwner) {
+    await warnNotOwnerYet(owner.mine, owner.theirs);
+    return { ok: false, ignored: "not-owner-yet" };
+  }
   if (owner.left) {
     await handOverBrowser(owner.mine, owner.theirs);
     return { ok: false, ignored: "handover" };

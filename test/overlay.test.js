@@ -38,13 +38,18 @@ after(async () => {
 });
 
 // 개발자 모드로 시각과 입실 상태를 강제한 페이지를 띄우고 content.js 를 올린다.
-// extra 로 저장소에 더 넣을 값(eduAccount, mattermost 등)을 줄 수 있다.
-async function openPage(dev, extra) {
+// extra 로 저장소에 더 넣을 값(eduAccount, mattermost 등)을 줄 수 있고,
+// util 로 상단 영역(.util)의 내용을 실제 화면 형식으로 갈아끼울 수 있다.
+async function openPage(dev, extra, util) {
   const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
   const pageErrors = [];
   page.on("pageerror", (e) => pageErrors.push(String(e)));
 
   await page.goto(FIXTURE);
+
+  // 실제 화면의 상단 표기를 그대로 재현해보고 싶을 때 쓴다. content.js 를
+  // 올리기 전에 바꿔야 첫 판정부터 그 형식으로 읽는다.
+  if (util) await page.evaluate((html) => (document.querySelector(".util").innerHTML = html), util);
 
   // content.js 가 실제로 쓰는 chrome API 만 흉내 낸다.
   // mattermost 는 저장소에 값이 없는 상태(설정 판정을 하지 않음)를 기본으로 둔다.
@@ -283,17 +288,82 @@ test("정리 안내는 그날 하루만 뜬다", async () => {
   }
 });
 
-// 설정을 마쳤는데도 "설정을 마쳐야 동작합니다" 배너가 뜨던 버그의 회귀 테스트.
-// content.js 가 사용자명 규칙을 따로 옮겨 적고 있었는데, mattermost.js 쪽만
-// "숫자로 시작하는 아이디 허용"으로 완화되면서 규칙이 갈라졌다. 그래서 자동
-// 연동으로 @1008mjw 처럼 숫자로 시작하는 아이디를 받은 사람은 팝업에서는
-// 설정 완료로 보이는데 출석 페이지에서만 계속 안내 배너를 봤다.
+// ── 실제 화면의 상단 표기 ─────────────────────────────────────────────
+// edu.ssafy.com 상단에는 이름만 있는 게 아니라 학번이 같이 뜬다.
+//
+//   [종] [사진] 1641993
+//              박경태님
+//
+// 학번까지 딸려 들어가면 "1641993박경태" 같은 값이 되어, 연결한 계정
+// ("박경태[서울_3반]")과 맞지 않아 본인이 자기 브라우저에서 막힌다.
+// 알림이 통째로 안 오는데 이유를 알 길이 없는 상태라, 실제 형식으로 박아둔다.
 const CONFIGURED_MM = {
   enabled: true,
   channel: "@1008mjw",
   webhookUrl: "https://meeting.ssafy.com/hooks/hz8ef7zb9f8qxqq9ru5drqug4a",
 };
 
+const REAL_UTIL = '<span class="num">1641993</span><span class="nm">박경태님</span> <a href="#">로그아웃</a>';
+
+test("학번이 같이 뜨는 실제 상단 표기에서도 이름만 읽는다", async () => {
+  // 주인을 "김철수"로 두면, 화면의 사람을 남으로 본 경우에만 배너가 뜬다.
+  // 배너에 "김철수"가 뜬다는 것은 화면에서 박경태를 제대로 읽었다는 뜻이다.
+  const { page, pageErrors } = await openPage(
+    { checkedIn: "false", time: 8 * 60 + 30 },
+    { eduAccount: { name: "김철수" } },
+    REAL_UTIL
+  );
+  try {
+    await page.waitForTimeout(1500);
+    assert.equal(pageErrors.length, 0, "페이지 에러: " + pageErrors.join(" | "));
+    assert.match(await bannerText(page), /김철수/, "학번 때문에 이름을 못 읽으면 배너 자체가 안 뜬다");
+  } finally {
+    await page.close();
+  }
+});
+
+test("반 정보가 붙은 연결 계정과 실제 상단 표기가 서로 맞는다", async () => {
+  // Mattermost 는 "박경태[서울_3반]", edu 는 "1641993 박경태님". 이 둘이 같은
+  // 사람으로 읽혀야 한다. 안 맞으면 본인이 주인으로 잡히지 못한다.
+  const { page, pageErrors } = await openPage(
+    { checkedIn: "false", time: 8 * 60 + 30 },
+    { mattermost: { ...CONFIGURED_MM, ownerNames: ["박경태[서울_3반]"] } },
+    REAL_UTIL
+  );
+  try {
+    await page.waitForTimeout(1500);
+    assert.equal(pageErrors.length, 0, "페이지 에러: " + pageErrors.join(" | "));
+    // 08:30 이면 평소의 입실 안내가 뜬다. 여기서 볼 것은 그 자리를 "남의
+    // 크롬" 안내가 빼앗지 않았는가다 (accountNotice 는 다른 안내를 밀어낸다).
+    const text = await bannerText(page);
+    assert.doesNotMatch(text, /이 크롬에는/, "본인인데 '남의 크롬' 안내가 뜨면 안 된다");
+    assert.match(text, /입실/, "평소 안내는 그대로 떠야 한다");
+  } finally {
+    await page.close();
+  }
+});
+
+test("연결 계정과 다른 사람이 앉으면 실제 표기에서도 알아챈다", async () => {
+  const { page } = await openPage(
+    { checkedIn: "false", time: 8 * 60 + 30 },
+    { mattermost: { ...CONFIGURED_MM, ownerNames: ["홍길동[서울_1반]"] } },
+    REAL_UTIL
+  );
+  try {
+    await page.waitForTimeout(1500);
+    const text = await bannerText(page);
+    assert.match(text, /홍길동/, "이 크롬이 누구 것인지 알려줘야 한다");
+    assert.doesNotMatch(text, /서울_1반/, "반 정보까지 문구에 넣으면 읽기 나쁘다");
+  } finally {
+    await page.close();
+  }
+});
+
+// 설정을 마쳤는데도 "설정을 마쳐야 동작합니다" 배너가 뜨던 버그의 회귀 테스트.
+// content.js 가 사용자명 규칙을 따로 옮겨 적고 있었는데, mattermost.js 쪽만
+// "숫자로 시작하는 아이디 허용"으로 완화되면서 규칙이 갈라졌다. 그래서 자동
+// 연동으로 @1008mjw 처럼 숫자로 시작하는 아이디를 받은 사람은 팝업에서는
+// 설정 완료로 보이는데 출석 페이지에서만 계속 안내 배너를 봤다.
 test("설정을 마친 숫자 시작 아이디 - 안내 배너 대신 강조가 뜬다", async () => {
   const { page, pageErrors } = await openPage(
     { checkedIn: "false", time: 8 * 60 + 30 },

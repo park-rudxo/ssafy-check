@@ -201,6 +201,65 @@
     return ts.id;
   }
 
+  // ── 이 브라우저의 주인이 누구인지 ────────────────────────────────────
+  // 확장은 "이 크롬에서 edu.ssafy.com 을 처음 연 계정"을 그 브라우저의 주인으로
+  // 기억한다. 그런데 연결만 해두고 아직 edu 를 열지 않은 사이에 다른 사람이
+  // 그 자리에 앉아 자기 아이디로 열면, 그 사람이 내 브라우저의 주인이 된다.
+  // 그때부터 내 출석이 "남의 출석"으로 무시되고, 나에게는 내 출석을 두고
+  // "다른 계정의 출석이라 알리지 않았어요"가 온다.
+  //
+  // 웹훅은 본인이 Mattermost 에 로그인해서 만든 것이므로, 그 계정이 곧 이
+  // 브라우저의 주인이다. 여기서 이름을 받아두면 "먼저 연 사람"이 아니라 그
+  // 이름으로 주인을 확정할 수 있다.
+  //
+  // 문제는 두 사이트가 쓰는 이름이 다르다는 것이다. edu 화면에는 한글 이름이
+  // 뜨는데 Mattermost 의 username 은 corqjffp010 같은 아이디라 비교가 안 된다.
+  // 그래서 프로필의 이름 칸에서 한글로 된 것만 골라낸다.
+  //
+  // 실제 SSAFY 계정의 이름은 반 정보가 붙어서 온다. 예: "박경태[서울_3반]"
+  // 대괄호·소괄호·밑줄 등 표기가 계정마다 제각각이라 형태를 열거하지 않고,
+  // 이름 칸을 통째로 들고 있다가 "한글 이름이 그 안에 들어 있는가"로 맞춘다.
+  // 그래야 표기가 어떻든, 이름이 앞에 있든 뒤에 있든 걸린다.
+  //
+  // 성과 이름이 어느 칸에 들어가는지도 계정마다 다를 수 있어서 순서를 짐작하지
+  // 않고 후보를 모두 남긴다.
+  //
+  // 한글이 전혀 없는 값(영문 아이디 등)은 버린다 - 남겨두면 edu 의 한글
+  // 이름과 무엇도 맞지 않아 정작 본인까지 막힌다. 후보가 비면 부르는 쪽이
+  // 예전처럼 "처음 본 계정"을 주인으로 잡는다.
+  function ownerNameHints(me) {
+    const squash = (v) => String(v == null ? "" : v).replace(/\s+/g, "");
+    const first = squash(me && me.first_name);
+    const last = squash(me && me.last_name);
+    const out = [];
+    for (const n of [squash(me && me.nickname), last + first, first + last, last, first]) {
+      // 한글이 두 자 이상 이어진 곳이 있어야 이름으로 볼 여지가 있다.
+      if (/[가-힣]{2,}/.test(n) && !out.includes(n)) out.push(n);
+    }
+    return out;
+  }
+
+  // 화면에 띄울 이름. 반 정보가 붙어 있으면 한글 이름만 뽑는다.
+  //   "박경태[서울_3반]" -> "박경태"
+  function displayOwnerName(hint) {
+    const m = /[가-힣]{2,6}/.exec(String(hint == null ? "" : hint));
+    return m ? m[0] : "";
+  }
+
+  // edu 화면에서 읽은 이름이 이 계정의 것인지 본다. 한쪽이 다른 쪽을 품고
+  // 있으면 같은 사람으로 본다 - 한쪽에만 반 정보가 붙어 있어도 걸리게 하려는
+  // 것이다. 정확히 같기를 요구하면 표기가 조금만 달라도 본인이 막히는데,
+  // 그쪽이 훨씬 나쁘다(알림이 통째로 안 오는데 이유를 알 길이 없다).
+  function matchesOwnerName(hints, name) {
+    const squash = (v) => String(v == null ? "" : v).replace(/\s+/g, "");
+    const n = squash(name);
+    if (!n) return false;
+    return (Array.isArray(hints) ? hints : []).some((h) => {
+      const x = squash(h);
+      return !!x && (x.includes(n) || n.includes(x));
+    });
+  }
+
   // ── 이미 만들어 둔 내 웹훅 ──────────────────────────────────────────
   // 예전에는 연결할 때마다 새 웹훅을 만들었다. 싸피는 자리 이동이 잦아서 자리를
   // 옮길 때마다 하나씩 늘어나고, 그 토큰은 떠나온 PC에 그대로 남는다. 다섯 대를
@@ -284,7 +343,13 @@
     return { found: mine.length, extras: extras.length, deleted, failed, keptId: keepId };
   }
 
-  // 성공하면 { webhookUrl, channel, reused } 를 돌려준다. 실패는 throw로 알린다.
+  // 연결 결과에서 계정 쪽 정보만 모은다.
+  function meResult(me) {
+    return { channel: "@" + me.username, ownerNames: ownerNameHints(me) };
+  }
+
+  // 성공하면 { webhookUrl, channel, ownerNames, reused } 를 돌려준다.
+  // 실패는 throw로 알린다.
   // 확장 페이지(팝업/설치 화면)에서 호출해야 한다 - 서비스 워커에는 이 호스트
   // 권한을 사용자 동작 없이 받을 방법이 없다.
   async function provisionPersonalWebhook() {
@@ -315,7 +380,7 @@
       const reusable = mine.find((h) => h.channel_id === channelId && !h.channel_locked);
       if (reusable) {
         dlog("이미 있는 개인 웹훅을 다시 쓴다", { username: me.username, hookId: reusable.id, 가진개수: mine.length });
-        return { webhookUrl: hookUrl(reusable.id), channel: "@" + me.username, reused: true };
+        return { ...meResult(me), webhookUrl: hookUrl(reusable.id), reused: true };
       }
     } catch (e) {
       dlog("웹훅 목록을 읽지 못해 새로 만든다", { error: String(e && e.message ? e.message : e) });
@@ -332,7 +397,7 @@
     if (!hook || !hook.id) throw new Error("웹훅을 만들지 못했어요.");
 
     dlog("개인 웹훅 발급 완료", { username: me.username, team: team.name, channelId, hookId: hook.id });
-    return { webhookUrl: hookUrl(hook.id), channel: "@" + me.username, reused: false };
+    return { ...meResult(me), webhookUrl: hookUrl(hook.id), reused: false };
   }
 
   root.SsafyMattermost = {
@@ -345,6 +410,9 @@
     provisionPersonalWebhook,
     cleanupMyWebhooks,
     hookIdOf,
+    ownerNameHints,
+    displayOwnerName,
+    matchesOwnerName,
     ERR_EMPTY,
     ERR_SHAPE,
   };

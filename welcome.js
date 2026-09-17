@@ -115,7 +115,15 @@
         return SsafyMattermost.provisionPersonalWebhook();
       })
       .then((res) => {
-        mm = { ...mm, webhookUrl: res.webhookUrl, channel: res.channel, enabled: true };
+        // ownerNames: 이 브라우저의 주인을 "먼저 edu 를 연 사람"이 아니라
+        // 방금 연결한 이 계정으로 확정하기 위한 이름이다.
+        mm = {
+          ...mm,
+          webhookUrl: res.webhookUrl,
+          channel: res.channel,
+          ownerNames: Array.isArray(res.ownerNames) ? res.ownerNames : [],
+          enabled: true,
+        };
         // 이 크롬이 누구 것인지도 다시 잡는다. 확장은 처음 본 에듀싸피 계정을
         // 이 브라우저의 주인으로 기억해 다른 계정의 출석은 무시하는데(남의
         // 자리에서 로그인해 체크한 알림이 자리 주인에게 가던 문제), 계정을
@@ -128,7 +136,18 @@
         return save({ mattermost: mm }).then(() => {
           btn.disabled = false;
           renderMattermost();
-          setStatus(`${res.channel} 로 연결했어요. 이제 테스트 메시지를 보내보세요.`, "ok");
+          // 팝업과 같은 말을 해야 한다. 한쪽에만 적어두면, 설치 화면으로
+          // 연결한 사람은 웹훅을 다시 쓰고 있는지 확인할 길이 없다.
+          setStatus(
+            res.reused
+              ? `${res.channel} 로 연결했어요. 전에 만들어 둔 웹훅을 그대로 씁니다. 이제 테스트 메시지를 보내보세요.`
+              : `${res.channel} 로 연결했어요. 이제 테스트 메시지를 보내보세요.`,
+            "ok"
+          );
+
+          // 출석 화면은 백그라운드가 연다. 설정이 저장되는 것을 보고 열기
+          // 때문에, 여기서 팝업이 닫히더라도 주인 확정은 그대로 일어난다.
+          // (background.js 의 openAttendanceAfterConnect)
         });
       })
       .catch((e) => {

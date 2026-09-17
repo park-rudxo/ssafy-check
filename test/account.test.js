@@ -25,9 +25,12 @@ const ROOT = path.join(__dirname, "..");
 function loadBackground() {
   const posts = []; // Mattermost로 나간 메시지
   const notes = []; // 크롬 알림
+  const tabs = []; // 열린 탭
   const store = {};
 
   const listeners = { addListener() {} };
+  // 저장소 변화를 듣는 쪽은 직접 불러봐야 해서 따로 붙잡아 둔다.
+  const storageListeners = [];
   const sandbox = {
     console,
     setTimeout,
@@ -38,7 +41,11 @@ function loadBackground() {
     },
     chrome: {
       alarms: { create() {}, clear() {}, onAlarm: listeners },
-      tabs: { create() {} },
+      tabs: {
+        create(opts) {
+          tabs.push(opts);
+        },
+      },
       notifications: {
         create(id, opts) {
           notes.push(opts);
@@ -53,7 +60,11 @@ function loadBackground() {
         getURL: (p) => "chrome-extension://test/" + p,
       },
       storage: {
-        onChanged: listeners,
+        onChanged: {
+          addListener(fn) {
+            storageListeners.push(fn);
+          },
+        },
         local: {
           async get(keys) {
             const list = typeof keys === "string" ? [keys] : keys;
@@ -93,7 +104,12 @@ function loadBackground() {
     notifyMissing: true,
   };
 
-  return { sandbox, store, posts, notes };
+  // 저장소가 바뀌었다고 알린다 (크롬이 하는 일을 대신한다).
+  const notifyChanged = (changes) => {
+    for (const fn of storageListeners) fn(changes, "local");
+  };
+
+  return { sandbox, store, posts, notes, tabs, notifyChanged };
 }
 
 // 나간 메시지 본문을 한 줄로 합친다 (attachments 안에 들어 있다).
@@ -323,4 +339,189 @@ test("정리한 뒤 다음 사람이 새 주인이 된다", async () => {
 
   assert.equal(store.eduAccount.name, "김철수");
   assert.equal(store.eduAccount.lastSeenAt, sandbox.todayStr());
+});
+
+// ── 주인을 "먼저 연 사람"이 아니라 연결된 계정으로 잡는다 ──────────────
+// 연결만 해두고 아직 edu 를 열지 않은 사이에 다른 사람이 그 자리에 앉아 자기
+// 아이디로 열면, 그 사람이 내 브라우저의 주인이 되어버렸다. 그때부터 내 출석이
+// "남의 출석"으로 무시되고, 나에게는 내 출석을 두고 "다른 계정의 출석이라
+// 알리지 않았어요"가 온다. 웹훅은 본인이 로그인해 만든 것이므로 그 계정이 곧
+// 주인이다.
+
+// 연결된 계정의 한글 이름을 아는 상태로 시작한다.
+function withOwnerNames(store, names) {
+  store.mattermost = { ...store.mattermost, ownerNames: names };
+}
+
+test("연결된 계정이 아니면 주인으로 잡지 않는다", async () => {
+  const { sandbox, store, posts, notes } = loadBackground();
+  withOwnerNames(store, ["홍길동"]);
+
+  // 홍길동이 연결만 해두고 edu 를 열기 전에 김철수가 앉았다.
+  await run(() => sandbox.handleAttendanceRecorded({ kind: "checkin", minutes: 8 * 60 + 16, account: "김철수" }));
+
+  assert.equal(store.eduAccount, undefined, "여기서 주인으로 기억하면 정작 본인이 계속 막힌다");
+  assert.equal(sent(posts, /입실 체크 완료/).length, 0, "남의 입실을 완료로 알리면 안 된다");
+  assert.equal(
+    store.attendance == null || store.attendance.checkinMin == null,
+    true,
+    "남의 입실을 내 오늘치로 저장하면 미체크 경고까지 멎는다"
+  );
+  assert.equal(notes.length, 1, "그 자리에 앉은 사람에게도 알려야 한다");
+  const warn = sent(posts, /본 적이 없어요/);
+  assert.equal(warn.length, 1, "주인은 왜 아무 알림도 안 오는지 알아야 한다");
+  assert.match(textOf(warn[0]), /김철수/, "지금 누가 로그인해 있는지 적어야 한다");
+  assert.match(textOf(warn[0]), /다시 지정하기/, "이름이 잘못 잡혔을 때의 탈출구를 알려줘야 한다");
+});
+
+test("연결된 계정 본인이면 그대로 주인이 된다", async () => {
+  const { sandbox, store, posts } = loadBackground();
+  withOwnerNames(store, ["홍길동"]);
+
+  await run(() => sandbox.handleAttendanceRecorded({ kind: "checkin", minutes: 8 * 60 + 16, account: "홍길동" }));
+
+  assert.equal(store.eduAccount.name, "홍길동");
+  assert.equal(sent(posts, /입실 체크 완료/).length, 1, "본인 출석은 평소대로 알려야 한다");
+});
+
+test("이름 후보가 여럿이면 그중 하나만 맞아도 본인이다", async () => {
+  // 성과 이름이 어느 칸에 들어가는지는 계정마다 다를 수 있어서 순서를 짐작하지
+  // 않고 후보를 모두 남긴다.
+  const { sandbox, store } = loadBackground();
+  withOwnerNames(store, ["길동홍", "홍길동"]);
+
+  await run(() => sandbox.handleAttendanceObserved({ checkinMin: 8 * 60 + 16, checkoutMin: null, account: "홍길동" }));
+
+  assert.equal(store.eduAccount.name, "홍길동");
+});
+
+test("사이 공백이 달라도 본인으로 본다", async () => {
+  // 두 사이트가 같은 이름을 다르게 띄울 수 있다. 공백 하나 때문에 본인이
+  // 막히면, 알림이 통째로 안 오는데 이유를 알 길이 없다.
+  const { sandbox, store } = loadBackground();
+  withOwnerNames(store, ["홍길동"]);
+
+  await run(() => sandbox.handleAttendanceObserved({ checkinMin: 8 * 60 + 16, checkoutMin: null, account: "홍 길동" }));
+
+  assert.equal(store.eduAccount.name, "홍 길동", "주인으로 잡혀야 한다");
+});
+
+test("연결된 계정 이름을 모르면 예전처럼 처음 본 계정을 주인으로 잡는다", async () => {
+  // 프로필에 한글 이름이 없는 계정(영문 아이디뿐)도 있다. 그때 이름으로
+  // 가리려 들면 아무도 주인이 못 되어 확장이 통째로 멎는다.
+  const { sandbox, store, posts } = loadBackground();
+  withOwnerNames(store, []);
+
+  await run(() => sandbox.handleAttendanceRecorded({ kind: "checkin", minutes: 8 * 60 + 16, account: "김철수" }));
+
+  assert.equal(store.eduAccount.name, "김철수");
+  assert.equal(sent(posts, /입실 체크 완료/).length, 1);
+});
+
+test("경고는 하루 한 번만 간다", async () => {
+  const { sandbox, store, posts, notes } = loadBackground();
+  withOwnerNames(store, ["홍길동"]);
+
+  for (let i = 0; i < 4; i++) {
+    await run(() =>
+      sandbox.handleAttendanceObserved({ checkinMin: 8 * 60 + 16, checkoutMin: null, account: "김철수" })
+    );
+  }
+
+  assert.equal(sent(posts, /본 적이 없어요/).length, 1, "같은 사정을 반복해서 보내면 그게 새로운 소음이 된다");
+  assert.equal(notes.length, 1);
+});
+
+test("주인이 이미 잡혀 있으면 연결된 계정 이름은 끼어들지 않는다", async () => {
+  // 이름이 잘못 잡혔을 때 팝업에서 주인을 다시 지정하면 ownerNames 도 같이
+  // 풀리지만, 옛 버전에서 저장된 주인이 남아 있을 수도 있다. 그때는 이미
+  // 잡힌 주인이 우선이고, 판정은 예전 규칙 그대로여야 한다.
+  const { sandbox, store, posts } = loadBackground();
+  store.eduAccount = { name: "김철수", boundAt: sandbox.todayStr(), lastSeenAt: sandbox.todayStr() };
+  withOwnerNames(store, ["홍길동"]);
+
+  await run(() => sandbox.handleAttendanceRecorded({ kind: "checkin", minutes: 8 * 60 + 16, account: "김철수" }));
+
+  assert.equal(sent(posts, /입실 체크 완료/).length, 1, "주인으로 잡힌 사람의 출석은 알린다");
+  assert.equal(sent(posts, /본 적이 없어요/).length, 0);
+});
+
+test("반 정보가 붙은 실제 이름 형식으로도 본인을 알아본다", async () => {
+  // 실제 SSAFY Mattermost 프로필은 "박경태[서울_3반]" 형식이다. edu 화면에는
+  // 이름만 뜨므로, 이 둘이 안 맞으면 본인이 자기 브라우저에서 막힌다.
+  const { sandbox, store, posts } = loadBackground();
+  withOwnerNames(store, ["박경태[서울_3반]"]);
+
+  await run(() => sandbox.handleAttendanceRecorded({ kind: "checkin", minutes: 8 * 60 + 16, account: "박경태" }));
+
+  assert.equal(store.eduAccount.name, "박경태", "본인이 주인으로 잡혀야 한다");
+  assert.equal(sent(posts, /입실 체크 완료/).length, 1);
+  assert.equal(sent(posts, /본 적이 없어요/).length, 0);
+});
+
+test("막았을 때 문구에는 반 정보를 빼고 이름만 쓴다", async () => {
+  const { sandbox, store, posts } = loadBackground();
+  withOwnerNames(store, ["박경태[서울_3반]"]);
+
+  await run(() => sandbox.handleAttendanceRecorded({ kind: "checkin", minutes: 8 * 60 + 16, account: "김철수" }));
+
+  const warn = sent(posts, /본 적이 없어요/);
+  assert.equal(warn.length, 1);
+  assert.match(textOf(warn[0]), /박경태님/, "'박경태[서울_3반]님' 은 읽기 나쁘다");
+  assert.doesNotMatch(textOf(warn[0]), /서울_3반/);
+});
+
+// ── 연결이 끝나면 출석 화면을 연다 ────────────────────────────────────
+// 주인을 연결한 계정으로 잡으려면, 연결한 사람이 아직 그 자리에 있을 때 edu 를
+// 한 번 열어둬야 한다.
+//
+// 이 일을 팝업에서 하게 했더니 탭도 안 열리고 결과 문구도 안 보이는 일이
+// 있었다. 팝업은 포커스를 잃는 순간 닫히고, 닫히면 그 뒤의 코드가 통째로
+// 사라진다. 그래서 "설정이 저장됐다"는 사실을 보고 서비스 워커가 연다.
+
+const DONE_MM = {
+  enabled: true,
+  channel: "@hong",
+  webhookUrl: "https://meeting.ssafy.com/hooks/abcdefghijklmnop",
+};
+
+test("연결이 끝나면 출석 화면을 뒤에서 연다", async () => {
+  const { tabs, notifyChanged } = loadBackground();
+
+  notifyChanged({ mattermost: { oldValue: undefined, newValue: DONE_MM } });
+
+  assert.equal(tabs.length, 1, "주인을 확정할 기회가 이때뿐이다");
+  assert.match(tabs[0].url, /edu\.ssafy\.com/);
+  assert.equal(tabs[0].active, false, "앞으로 띄우면 설정을 마치던 사람을 끌어낸다");
+});
+
+test("알림 설정을 켜고 끄는 것으로는 탭이 열리지 않는다", async () => {
+  // mattermost 키 하나에 알림 종류까지 같이 들어 있다. 바뀔 때마다 열면
+  // 체크박스를 누를 때마다 탭이 하나씩 생긴다.
+  const { tabs, notifyChanged } = loadBackground();
+
+  notifyChanged({
+    mattermost: { oldValue: DONE_MM, newValue: { ...DONE_MM, notifyCheckin: false } },
+  });
+
+  assert.deepEqual(tabs, []);
+});
+
+test("연결이 끝나지 않은 저장은 탭을 열지 않는다", async () => {
+  const { tabs, notifyChanged } = loadBackground();
+
+  // 웹훅만 있고 받을 곳이 없는 중간 상태.
+  notifyChanged({ mattermost: { oldValue: undefined, newValue: { ...DONE_MM, channel: "" } } });
+  // 연결을 끈 경우.
+  notifyChanged({ mattermost: { oldValue: DONE_MM, newValue: { ...DONE_MM, enabled: false } } });
+
+  assert.deepEqual(tabs, []);
+});
+
+test("다른 값이 바뀔 때는 열지 않는다", async () => {
+  const { tabs, notifyChanged } = loadBackground();
+
+  notifyChanged({ eduAccount: { oldValue: undefined, newValue: { name: "홍길동" } } });
+
+  assert.deepEqual(tabs, []);
 });

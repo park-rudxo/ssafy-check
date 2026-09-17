@@ -136,10 +136,13 @@
         return save({ mattermost: mm }).then(() => {
           btn.disabled = false;
           renderMattermost();
-          // 출석 화면을 바로 연다. 연결만 해두고 edu 를 안 연 채 자리를 뜨면
-          // 그 사이에 앉은 사람이 주인으로 잡힌다.
-          chrome.tabs.create({ url: SSAFY_HOME });
           setStatus(`${res.channel} 로 연결했어요. 이제 테스트 메시지를 보내보세요.`, "ok");
+
+          // 출석 화면을 열어 이 자리에서 주인을 확정한다. 연결만 해두고 edu 를
+          // 안 연 채 자리를 뜨면 그 사이에 앉은 사람이 주인으로 잡힌다.
+          // 뒤에서 연다 - 설치 화면에는 "테스트 메시지 보내기"가 남아 있어서,
+          // 앞으로 띄우면 다 끝나지도 않은 설정에서 사람을 끌어낸다.
+          chrome.tabs.create({ url: SSAFY_HOME, active: false });
         });
       })
       .catch((e) => {

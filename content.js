@@ -416,8 +416,9 @@
     // 자기 알림이 여기로 오지 않는다는 것을 모른 채 하루를 보낸다.
     const names = mm && Array.isArray(mm.ownerNames) ? mm.ownerNames : [];
     if (!names.length) return "";
-    const squash = (v) => String(v == null ? "" : v).replace(/\s+/g, "");
-    return names.some((n) => squash(n) === squash(here)) ? "" : names[0];
+    if (SsafyMattermost.matchesOwnerName(names, here)) return "";
+    // 반 정보가 붙어 있으면 이름만 띄운다 ("박경태[서울_3반]" -> "박경태").
+    return SsafyMattermost.displayOwnerName(names[0]) || names[0];
   }
 
   // ── 페이지에 표시된 출석 상태 읽기 ──────────────────────────────────

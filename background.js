@@ -339,16 +339,12 @@ function accountName(v) {
   return typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, 20) : "";
 }
 
-// 두 사이트가 같은 이름을 다르게 띄울 수 있어서(사이 공백 등) 공백을 걷고 본다.
-function squashName(v) {
-  return typeof v === "string" ? v.replace(/\s+/g, "") : "";
-}
-
-// 연결한 Mattermost 계정의 한글 이름 후보. 비어 있으면(영문 아이디뿐이거나
-// 아직 연결 전) 이름으로 주인을 가릴 근거가 없다는 뜻이다.
+// 연결한 Mattermost 계정의 이름 칸. 반 정보가 붙어 오기도 한다
+// ("박경태[서울_3반]"). 비어 있으면(영문 아이디뿐이거나 아직 연결 전) 이름으로
+// 주인을 가릴 근거가 없다는 뜻이다. 맞추는 규칙은 mattermost.js 에 있다.
 async function expectedOwnerNames() {
   const s = await getMattermost();
-  return Array.isArray(s.ownerNames) ? s.ownerNames.map(squashName).filter(Boolean) : [];
+  return Array.isArray(s.ownerNames) ? s.ownerNames.filter(Boolean) : [];
 }
 
 // 보고에 실린 계정이 이 브라우저 주인의 것인지 본다.
@@ -371,9 +367,10 @@ async function checkEduOwner(reported) {
     // 앉은 것이다. 여기서 주인으로 기억해버리면 정작 본인의 출석이 그 뒤로
     // 계속 "남의 출석"으로 무시된다.
     const expected = await expectedOwnerNames();
-    if (expected.length && !expected.includes(squashName(name))) {
+    if (expected.length && !SsafyMattermost.matchesOwnerName(expected, name)) {
       SsafyDebug.log("계정", "연결된 계정이 아니라 주인으로 잡지 않음", { expected, name });
-      return { ok: false, mine: expected[0], theirs: name, notOwner: true };
+      // 문구에는 반 정보를 뺀 이름만 쓴다. "박경태[서울_3반]님" 은 읽기 나쁘다.
+      return { ok: false, mine: SsafyMattermost.displayOwnerName(expected[0]) || expected[0], theirs: name, notOwner: true };
     }
     await chrome.storage.local.set({ eduAccount: { name, boundAt: today, lastSeenAt: today } });
     SsafyDebug.log("계정", "이 브라우저의 주인으로 기억함", { name });

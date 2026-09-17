@@ -367,24 +367,47 @@ test("hookIdOf 는 우리 웹훅 주소에서만 id를 떼어낸다", () => {
   assert.equal(MM.hookIdOf(null), "");
 });
 
-// ── 연결한 계정의 한글 이름 ───────────────────────────────────────────
+// ── 연결한 계정의 이름 ────────────────────────────────────────────────
 // edu 화면에는 한글 이름이 뜨는데 Mattermost 의 username 은 corqjffp010 같은
-// 아이디라 비교가 안 된다. 프로필의 이름 칸에서 한글로 된 것만 골라내,
-// "먼저 edu 를 연 사람"이 아니라 연결한 계정으로 주인을 확정하는 데 쓴다.
+// 아이디라 비교가 안 된다. 게다가 실제 SSAFY 계정의 이름에는 반 정보가 붙어
+// 온다 - "박경태[서울_3반]". 그래서 이름 칸을 통째로 들고 있다가 "한글 이름이
+// 그 안에 들어 있는가"로 맞춘다.
 
 // vm 컨텍스트가 만든 배열은 호스트의 Array 와 프로토타입이 달라서, 내용이
 // 같아도 deepStrictEqual 이 거절한다. 내용만 보려고 호스트 배열로 옮긴다.
 const names = (v) => Array.from(v || []);
 
-test("프로필의 한글 이름을 후보로 뽑는다", () => {
+test("반 정보가 붙은 실제 이름을 그대로 들고 있는다", () => {
   const { MM } = loadWithServer({});
-  // 성과 이름이 어느 칸에 들어가는지는 계정마다 다를 수 있어서 순서를 짐작하지
-  // 않고 둘 다 남긴다. 하나만 맞아도 본인으로 본다.
-  assert.deepEqual(names(MM.koreanNameCandidates({ first_name: "길동", last_name: "홍" })), ["홍길동", "길동홍"]);
-  assert.deepEqual(names(MM.koreanNameCandidates({ nickname: "홍길동" })), ["홍길동"]);
+  // 예전에는 순수 한글만 받아서 이 형태가 통째로 버려졌고, 그러면 이름 대조가
+  // 아예 안 걸린다.
+  assert.deepEqual(names(MM.ownerNameHints({ nickname: "박경태[서울_3반]" })), ["박경태[서울_3반]"]);
 });
 
-test("한글이 아닌 값은 후보로 쓰지 않는다", () => {
+test("반 정보가 붙어 있어도 본인으로 본다", () => {
+  const { MM } = loadWithServer({});
+  const hints = names(MM.ownerNameHints({ nickname: "박경태[서울_3반]" }));
+
+  assert.equal(MM.matchesOwnerName(hints, "박경태"), true, "edu 에는 이름만 뜬다");
+  assert.equal(MM.matchesOwnerName(hints, "박 경태"), true, "사이 공백은 걷어낸다");
+  assert.equal(MM.matchesOwnerName(hints, "김철수"), false, "남까지 통과시키면 기능이 없는 것과 같다");
+  assert.equal(MM.matchesOwnerName(hints, ""), false, "이름을 못 읽었으면 판단 근거가 없다");
+});
+
+test("성과 이름이 칸으로 나뉘어 있어도 맞춘다", () => {
+  // 어느 칸에 무엇이 들어가는지는 계정마다 다를 수 있어 순서를 짐작하지 않는다.
+  const { MM } = loadWithServer({});
+  for (const me of [
+    { last_name: "박", first_name: "경태[서울_3반]" },
+    { first_name: "경태", last_name: "박" },
+    { nickname: "박경태" },
+  ]) {
+    const hints = names(MM.ownerNameHints(me));
+    assert.equal(MM.matchesOwnerName(hints, "박경태"), true, `${JSON.stringify(me)} 에서 본인을 못 찾았다`);
+  }
+});
+
+test("한글이 없는 값은 후보로 쓰지 않는다", () => {
   // 영문 아이디를 후보로 남기면 edu 의 한글 이름과 무엇도 맞지 않아, 정작
   // 본인이 주인으로 잡히지 못하고 확장이 통째로 멎는다. 후보가 비면 예전처럼
   // 처음 본 계정을 주인으로 잡는다.
@@ -392,42 +415,43 @@ test("한글이 아닌 값은 후보로 쓰지 않는다", () => {
   for (const me of [
     { username: "corqjffp010" },
     { first_name: "Gildong", last_name: "Hong" },
-    { nickname: "hong" },
-    { nickname: "홍gil" },
+    { nickname: "hong[seoul_3]" },
     {},
     null,
   ]) {
-    assert.deepEqual(names(MM.koreanNameCandidates(me)), [], `${JSON.stringify(me)} 는 후보가 없어야 한다`);
+    assert.deepEqual(names(MM.ownerNameHints(me)), [], `${JSON.stringify(me)} 는 후보가 없어야 한다`);
   }
 });
 
-test("이름 칸의 공백과 중복은 정리한다", () => {
+test("문구에 쓸 이름은 반 정보를 뺀다", () => {
+  // "박경태[서울_3반]님을 본 적이 없어요" 는 읽기 나쁘다.
   const { MM } = loadWithServer({});
-  assert.deepEqual(names(MM.koreanNameCandidates({ first_name: " 길동 ", last_name: " 홍 " })), ["홍길동", "길동홍"]);
-  // 한 칸에 전체 이름이 들어 있으면 붙인 결과가 겹친다. 같은 것을 두 번 넣지 않는다.
-  assert.deepEqual(names(MM.koreanNameCandidates({ nickname: "홍길동", first_name: "홍길동" })), ["홍길동"]);
+  assert.equal(MM.displayOwnerName("박경태[서울_3반]"), "박경태");
+  assert.equal(MM.displayOwnerName("박경태 (서울 3반)"), "박경태");
+  assert.equal(MM.displayOwnerName("서울3반_박경태"), "서울");  // 이름이 뒤면 앞의 한글을 집는다
+  assert.equal(MM.displayOwnerName("hong"), "", "뽑을 게 없으면 부르는 쪽이 원본을 쓴다");
 });
 
-test("연결 결과에 이름 후보가 실려 온다", async () => {
+test("연결 결과에 이름이 실려 온다", async () => {
   const { MM } = loadWithServer({
-    me: { id: "u1", username: "corqjffp010", first_name: "길동", last_name: "홍" },
+    me: { id: "u1", username: "corqjffp010", nickname: "박경태[서울_3반]" },
     hooks: [],
   });
 
   const res = await MM.provisionPersonalWebhook();
 
   assert.equal(res.channel, "@corqjffp010", "받는 곳은 지금까지처럼 username 이다");
-  assert.deepEqual(names(res.ownerNames), ["홍길동", "길동홍"], "주인 판정에 쓸 이름은 따로 실어야 한다");
+  assert.deepEqual(names(res.ownerNames), ["박경태[서울_3반]"], "주인 판정에 쓸 이름은 따로 실어야 한다");
 });
 
-test("웹훅을 물려받을 때도 이름 후보가 실려 온다", async () => {
+test("웹훅을 물려받을 때도 이름이 실려 온다", async () => {
   const { MM } = loadWithServer({
-    me: { id: "u1", username: "corqjffp010", nickname: "홍길동" },
+    me: { id: "u1", username: "corqjffp010", nickname: "박경태[서울_3반]" },
     hooks: [myHook("h1")],
   });
 
   const res = await MM.provisionPersonalWebhook();
 
   assert.equal(res.reused, true);
-  assert.deepEqual(names(res.ownerNames), ["홍길동"], "다시 쓰는 경로에서 빠지면 그쪽만 예전처럼 동작한다");
+  assert.deepEqual(names(res.ownerNames), ["박경태[서울_3반]"], "다시 쓰는 경로에서 빠지면 그쪽만 예전처럼 동작한다");
 });

@@ -429,3 +429,28 @@ test("주인이 이미 잡혀 있으면 연결된 계정 이름은 끼어들지 
   assert.equal(sent(posts, /입실 체크 완료/).length, 1, "주인으로 잡힌 사람의 출석은 알린다");
   assert.equal(sent(posts, /본 적이 없어요/).length, 0);
 });
+
+test("반 정보가 붙은 실제 이름 형식으로도 본인을 알아본다", async () => {
+  // 실제 SSAFY Mattermost 프로필은 "박경태[서울_3반]" 형식이다. edu 화면에는
+  // 이름만 뜨므로, 이 둘이 안 맞으면 본인이 자기 브라우저에서 막힌다.
+  const { sandbox, store, posts } = loadBackground();
+  withOwnerNames(store, ["박경태[서울_3반]"]);
+
+  await run(() => sandbox.handleAttendanceRecorded({ kind: "checkin", minutes: 8 * 60 + 16, account: "박경태" }));
+
+  assert.equal(store.eduAccount.name, "박경태", "본인이 주인으로 잡혀야 한다");
+  assert.equal(sent(posts, /입실 체크 완료/).length, 1);
+  assert.equal(sent(posts, /본 적이 없어요/).length, 0);
+});
+
+test("막았을 때 문구에는 반 정보를 빼고 이름만 쓴다", async () => {
+  const { sandbox, store, posts } = loadBackground();
+  withOwnerNames(store, ["박경태[서울_3반]"]);
+
+  await run(() => sandbox.handleAttendanceRecorded({ kind: "checkin", minutes: 8 * 60 + 16, account: "김철수" }));
+
+  const warn = sent(posts, /본 적이 없어요/);
+  assert.equal(warn.length, 1);
+  assert.match(textOf(warn[0]), /박경태님/, "'박경태[서울_3반]님' 은 읽기 나쁘다");
+  assert.doesNotMatch(textOf(warn[0]), /서울_3반/);
+});

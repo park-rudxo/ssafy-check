@@ -216,20 +216,48 @@
   // 뜨는데 Mattermost 의 username 은 corqjffp010 같은 아이디라 비교가 안 된다.
   // 그래서 프로필의 이름 칸에서 한글로 된 것만 골라낸다.
   //
-  // 성과 이름이 어느 칸에 들어가는지는 계정마다 다를 수 있어서 순서를 짐작하지
-  // 않고 후보를 모두 남긴다. edu 이름이 그중 하나와 같으면 본인으로 본다.
-  // 한글이 아닌 값(영문 아이디 등)은 애초에 비교 대상이 아니므로 버린다 -
-  // 남겨두면 무엇과도 안 맞아 본인까지 막힌다.
-  function koreanNameCandidates(me) {
+  // 실제 SSAFY 계정의 이름은 반 정보가 붙어서 온다. 예: "박경태[서울_3반]"
+  // 대괄호·소괄호·밑줄 등 표기가 계정마다 제각각이라 형태를 열거하지 않고,
+  // 이름 칸을 통째로 들고 있다가 "한글 이름이 그 안에 들어 있는가"로 맞춘다.
+  // 그래야 표기가 어떻든, 이름이 앞에 있든 뒤에 있든 걸린다.
+  //
+  // 성과 이름이 어느 칸에 들어가는지도 계정마다 다를 수 있어서 순서를 짐작하지
+  // 않고 후보를 모두 남긴다.
+  //
+  // 한글이 전혀 없는 값(영문 아이디 등)은 버린다 - 남겨두면 edu 의 한글
+  // 이름과 무엇도 맞지 않아 정작 본인까지 막힌다. 후보가 비면 부르는 쪽이
+  // 예전처럼 "처음 본 계정"을 주인으로 잡는다.
+  function ownerNameHints(me) {
     const squash = (v) => String(v == null ? "" : v).replace(/\s+/g, "");
     const first = squash(me && me.first_name);
     const last = squash(me && me.last_name);
-    const hangul = /^[가-힣]{2,6}$/;
     const out = [];
-    for (const n of [squash(me && me.nickname), last + first, first + last]) {
-      if (hangul.test(n) && !out.includes(n)) out.push(n);
+    for (const n of [squash(me && me.nickname), last + first, first + last, last, first]) {
+      // 한글이 두 자 이상 이어진 곳이 있어야 이름으로 볼 여지가 있다.
+      if (/[가-힣]{2,}/.test(n) && !out.includes(n)) out.push(n);
     }
     return out;
+  }
+
+  // 화면에 띄울 이름. 반 정보가 붙어 있으면 한글 이름만 뽑는다.
+  //   "박경태[서울_3반]" -> "박경태"
+  function displayOwnerName(hint) {
+    const m = /[가-힣]{2,6}/.exec(String(hint == null ? "" : hint));
+    return m ? m[0] : "";
+  }
+
+  // edu 화면에서 읽은 이름이 이 계정의 것인지 본다. 한쪽이 다른 쪽을 품고
+  // 있으면 같은 사람으로 본다 - 한쪽에만 반 정보가 붙어 있어도 걸리게 하려는
+  // 것이다. 정확히 같기를 요구하면 표기가 조금만 달라도 본인이 막히는데,
+  // 그쪽이 훨씬 나쁘다(알림이 통째로 안 오는데 이유를 알 길이 없다).
+  function matchesOwnerName(hints, name) {
+    const squash = (v) => String(v == null ? "" : v).replace(/\s+/g, "");
+    const n = squash(name);
+    if (!n) return false;
+    return (Array.isArray(hints) ? hints : []).some((h) => {
+      const x = squash(h);
+      return !!x && (x.includes(n) || n.includes(x));
+    });
   }
 
   // ── 이미 만들어 둔 내 웹훅 ──────────────────────────────────────────
@@ -317,7 +345,7 @@
 
   // 연결 결과에서 계정 쪽 정보만 모은다.
   function meResult(me) {
-    return { channel: "@" + me.username, ownerNames: koreanNameCandidates(me) };
+    return { channel: "@" + me.username, ownerNames: ownerNameHints(me) };
   }
 
   // 성공하면 { webhookUrl, channel, ownerNames, reused } 를 돌려준다.
@@ -382,7 +410,9 @@
     provisionPersonalWebhook,
     cleanupMyWebhooks,
     hookIdOf,
-    koreanNameCandidates,
+    ownerNameHints,
+    displayOwnerName,
+    matchesOwnerName,
     ERR_EMPTY,
     ERR_SHAPE,
   };

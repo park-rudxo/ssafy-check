@@ -64,8 +64,11 @@ function loadBackground() {
           async set(obj) {
             Object.assign(store, obj);
           },
-          async remove(k) {
-            delete store[k];
+          // 진짜 chrome.storage 는 키 하나든 배열이든 받는다. 한쪽만
+          // 흉내 내면 여러 키를 한 번에 지우는 코드가 테스트에서만 조용히
+          // 아무것도 안 지운다.
+          async remove(keys) {
+            for (const k of typeof keys === "string" ? [keys] : keys) delete store[k];
           },
         },
       },
@@ -100,6 +103,30 @@ function textOf(post) {
 
 function sent(posts, re) {
   return posts.filter((p) => re.test(textOf(p)));
+}
+
+// 백그라운드 핸들러를 부르고, 그 안에서 일어난 일이 전부 끝날 때까지 기다린다.
+// 여러 개를 넘기면 동시에 도착한 보고가 된다.
+//
+// 돌려받은 프로미스를 그냥 await 하면 안 되는 경우가 있다. vm 컨텍스트 안에서
+// 만들어진 프로미스를 호스트에서 곧바로 await 하면, 그 경로가 호스트 쪽
+// 비동기(여기서는 fetch 흉내)를 한 번도 거치지 않을 때 node:test 아래에서
+// 영영 돌아오지 않는다. 설정을 지운 뒤라 알림을 한 건도 안 보내는 경로가
+// 정확히 그렇다. 그래서 프로미스 대신 호스트 타이머로 한 틱 쉬어, 그 사이에
+// 마이크로태스크가 다 흐르게 한다. 제품 코드와 무관한 이 하네스만의 문제다.
+function run(...calls) {
+  let failed = null;
+  for (const call of calls) {
+    try {
+      const p = call();
+      if (p && typeof p.then === "function") p.then(null, (e) => (failed = e));
+    } catch (e) {
+      failed = e;
+    }
+  }
+  return new Promise((r) => setTimeout(r, 0)).then(() => {
+    if (failed) throw failed;
+  });
 }
 
 test("처음 본 계정을 이 브라우저의 주인으로 기억한다", async () => {
@@ -180,4 +207,120 @@ test("주인 본인의 출석은 그대로 알린다", async () => {
 
   assert.equal(sent(posts, /입실 체크 완료/).length, 1, "앞뒤 공백 때문에 남으로 취급하면 안 된다");
   assert.equal(sent(posts, /다른 계정/).length, 0);
+});
+
+// ── 떠난 자리 정리 ────────────────────────────────────────────────────
+// 자리를 옮겨도 확장과 확장의 저장소는 그 PC에 그대로 남는다(크롬 기록을
+// 지워도 마찬가지다). 그래서 옮겨 다닌 PC마다 내 웹훅 토큰이 하나씩 살아남고
+// 그 자리에 다음 사람이 앉는다. 주인이 하루 동안 한 번도 안 보이는데 다른
+// 계정이 쓰고 있으면, 주인은 떠난 것으로 보고 그 PC의 개인 설정을 지운다.
+//
+// 아래 테스트들은 await 대신 run() 을 쓴다 (이유는 run() 의 주석 참고).
+
+const YESTERDAY = "2026-08-24"; // 오늘일 리 없는 날짜
+const 남의출석 = { checkinMin: 8 * 60 + 16, checkoutMin: null, account: "김철수" };
+
+test("주인이 오늘 안 보인 PC에 다른 계정이 앉으면 개인 설정을 지운다", async () => {
+  const { sandbox, store, notes } = loadBackground();
+  store.eduAccount = { name: "홍길동", boundAt: YESTERDAY, lastSeenAt: YESTERDAY };
+  store.attendance = { date: YESTERDAY, checkinMin: 500 };
+  store.dayOff = { offDays: ["2026-09-01"], workDays: [] };
+
+  await run(() => sandbox.handleAttendanceObserved(남의출석));
+
+  assert.equal(store.mattermost, undefined, "웹훅 토큰이 남의 PC에 살아 있으면 안 된다");
+  assert.equal(store.eduAccount, undefined, "주인을 지워야 다음 사람이 자연스럽게 주인이 된다");
+  assert.equal(store.attendance, undefined, "주인의 출석 상태도 남기지 않는다");
+  assert.equal(
+    store.dayOff,
+    undefined,
+    "주인의 연차가 남으면 다음 사람은 그날 알림을 통째로 못 받고 이유도 알 수 없다"
+  );
+  assert.equal(notes.length, 1, "그 자리에 앉은 사람에게 정리했다고 알려야 한다");
+});
+
+test("지우기 전에 주인에게 먼저 알린다", async () => {
+  // 순서가 뒤집히면 웹훅이 먼저 사라져서 알릴 길이 없어진다. 주인은 알림이
+  // 멎은 줄도 모른 채 그날 퇴실을 놓친다 - 이 확장이 막으려던 바로 그 상황이다.
+  const { sandbox, store, posts } = loadBackground();
+  store.eduAccount = { name: "홍길동", boundAt: YESTERDAY, lastSeenAt: YESTERDAY };
+
+  await run(() => sandbox.handleAttendanceObserved(남의출석));
+
+  const bye = sent(posts, /지웠어요/);
+  assert.equal(bye.length, 1, "주인은 자기 설정이 지워졌다는 것을 반드시 알아야 한다");
+  assert.match(textOf(bye[0]), /알림은 이제 없습니다/, "그 PC에서 알림이 안 온다는 사실을 적어야 한다");
+  assert.equal(sent(posts, /입실 체크 완료/).length, 0, "남의 입실을 완료로 알리면 안 된다");
+});
+
+test("주인을 오늘 봤으면 잠깐 남이 앉은 것이라 지우지 않는다", async () => {
+  const { sandbox, store, posts } = loadBackground();
+  store.eduAccount = { name: "홍길동", boundAt: YESTERDAY };
+
+  // 주인이 먼저 자기 자리에서 출석을 본다 (lastSeenAt 이 오늘로 갱신된다).
+  await run(() =>
+    sandbox.handleAttendanceObserved({ checkinMin: 8 * 60 + 16, checkoutMin: null, account: "홍길동" })
+  );
+  assert.equal(store.eduAccount.lastSeenAt, sandbox.todayStr(), "주인을 본 날을 남겨야 한다");
+
+  // 그 뒤 같은 날 남이 앉았다.
+  await run(() => sandbox.handleAttendanceObserved({ ...남의출석, checkinMin: 9 * 60 }));
+
+  assert.notEqual(store.mattermost, undefined, "주인이 오늘 쓴 PC의 설정을 지우면 안 된다");
+  assert.equal(store.eduAccount.name, "홍길동", "주인도 그대로여야 한다");
+  assert.equal(sent(posts, /지웠어요/).length, 0);
+  assert.equal(sent(posts, /다른 계정/).length, 1, "대신 예전처럼 사정만 알린다");
+});
+
+test("확장을 업데이트한 것만으로는 지우지 않는다", async () => {
+  // lastSeenAt 은 이 기능과 함께 생겼다. 그 전에 저장된 주인에게는 이 값이
+  // 없는데, 이것을 "오래 안 보였다"로 읽으면 업데이트 당일 남이 잠깐
+  // 앉기만 해도 멀쩡한 설정이 날아간다.
+  const { sandbox, store, posts } = loadBackground();
+  store.eduAccount = { name: "홍길동", boundAt: YESTERDAY }; // lastSeenAt 없음
+
+  await run(() => sandbox.handleAttendanceObserved(남의출석));
+
+  assert.notEqual(store.mattermost, undefined, "업데이트 당일은 예전과 똑같이 동작해야 한다");
+  assert.equal(sent(posts, /지웠어요/).length, 0);
+  assert.equal(sent(posts, /다른 계정/).length, 1);
+});
+
+test("보고가 연달아 와도 한 번만 정리한다", async () => {
+  // SSAFY 탭을 여러 개 열어두면 같은 보고가 거의 동시에 여러 번 온다.
+  const { sandbox, store, posts, notes } = loadBackground();
+  store.eduAccount = { name: "홍길동", boundAt: YESTERDAY, lastSeenAt: YESTERDAY };
+
+  await run(
+    () => sandbox.handleAttendanceObserved(남의출석),
+    () => sandbox.handleAttendanceObserved({ ...남의출석, checkoutMin: 18 * 60 }),
+    () => sandbox.handleAttendanceRecorded({ kind: "checkin", minutes: 8 * 60 + 16, account: "김철수" })
+  );
+
+  assert.equal(sent(posts, /지웠어요/).length, 1, "같은 작별 인사를 여러 번 보내면 안 된다");
+  assert.equal(notes.length, 1);
+  assert.equal(store.mattermost, undefined);
+});
+
+test("정리한 사실을 그날 화면에 띄울 수 있게 남긴다", async () => {
+  // 지우고 나면 확장은 갓 설치한 것과 똑같아진다. 지금 앉은 사람에게 아무
+  // 설명이 없으면 그냥 고장 난 것으로 보인다.
+  const { sandbox, store } = loadBackground();
+  store.eduAccount = { name: "홍길동", boundAt: YESTERDAY, lastSeenAt: YESTERDAY };
+
+  await run(() => sandbox.handleAttendanceObserved(남의출석));
+
+  assert.equal(store.eduHandover.date, sandbox.todayStr());
+  assert.equal(store.eduHandover.from, "홍길동", "누구 설정을 정리했는지 화면에 적어야 한다");
+});
+
+test("정리한 뒤 다음 사람이 새 주인이 된다", async () => {
+  const { sandbox, store } = loadBackground();
+  store.eduAccount = { name: "홍길동", boundAt: YESTERDAY, lastSeenAt: YESTERDAY };
+
+  await run(() => sandbox.handleAttendanceObserved(남의출석));
+  await run(() => sandbox.handleAttendanceObserved(남의출석));
+
+  assert.equal(store.eduAccount.name, "김철수");
+  assert.equal(store.eduAccount.lastSeenAt, sandbox.todayStr());
 });

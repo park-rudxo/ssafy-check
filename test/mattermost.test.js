@@ -168,3 +168,201 @@ test("설정 완료는 연동이 켜져 있고 내 웹훅과 내 아이디가 �
   assert.equal(MM.isConfigured(undefined), false);
   assert.equal(MM.isConfigured({}), false);
 });
+
+// ── 웹훅 재사용과 정리 ────────────────────────────────────────────────
+// 예전에는 연결할 때마다 새 웹훅을 만들었다. 싸피는 자리 이동이 잦아서 옮길
+// 때마다 하나씩 늘고, 그 토큰은 떠나온 PC에 그대로 남는다. 다섯 대를 거치면
+// 계정 아래에 웹훅이 다섯 개다. 이미 있는 것을 다시 쓰면 더 늘지 않는다.
+
+const HOOK_NAME = "SSAFY 출석 알리미";
+
+// mattermost.js 가 쓰는 API 만 흉내 낸 가짜 서버 위에서 모듈을 올린다.
+// hooks 는 서버에 이미 있는 웹훅 목록, listStatus 는 목록 조회 응답 코드다.
+function loadWithServer(opts) {
+  const o = opts || {};
+  const server = {
+    me: o.me || { id: "u1", username: "hong" },
+    teams: o.teams || [{ id: "t1", name: "ssafy" }],
+    hooks: (o.hooks || []).map((h) => ({ ...h })),
+    listStatus: o.listStatus || 200,
+    created: [],
+    deleted: [],
+    calls: [],
+  };
+
+  const json = (body, status) => ({
+    ok: (status || 200) < 400,
+    status: status || 200,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+    clone: () => json(body, status),
+  });
+
+  const sandbox = {
+    console,
+    fetch: async (url, init) => {
+      const method = (init && init.method) || "GET";
+      const path = String(url).replace("https://meeting.ssafy.com/api/v4", "");
+      server.calls.push(`${method} ${path}`);
+
+      if (path === "/users/me") return json(server.me);
+      if (path === "/users/me/teams") return json(server.teams);
+      if (/^\/teams\/[^/]+\/channels\/name\/ssafy-attendance$/.test(path)) return json({ id: "c1" });
+      if (path.startsWith("/hooks/incoming?")) {
+        if (server.listStatus !== 200) return json({ message: "no" }, server.listStatus);
+        return json(server.hooks);
+      }
+      if (path === "/hooks/incoming" && method === "POST") {
+        const made = { id: "new" + (server.created.length + 1) };
+        server.created.push(JSON.parse(init.body));
+        return json(made);
+      }
+      const del = /^\/hooks\/incoming\/(.+)$/.exec(path);
+      if (del && method === "DELETE") {
+        server.deleted.push(del[1]);
+        server.hooks = server.hooks.filter((h) => h.id !== del[1]);
+        return json({ status: "OK" });
+      }
+      return json({ message: "not found" }, 404);
+    },
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "mattermost.js"), "utf8"), sandbox);
+  return { MM: sandbox.SsafyMattermost, server };
+}
+
+// 이 확장이 내 계정으로 만든, 멀쩡히 쓸 수 있는 웹훅.
+function myHook(id, extra) {
+  return { id, user_id: "u1", display_name: HOOK_NAME, channel_id: "c1", channel_locked: false, ...extra };
+}
+
+test("이미 만들어 둔 웹훅이 있으면 새로 만들지 않고 그걸 쓴다", async () => {
+  const { MM, server } = loadWithServer({ hooks: [myHook("h1")] });
+
+  const res = await MM.provisionPersonalWebhook();
+
+  assert.equal(res.webhookUrl, "https://meeting.ssafy.com/hooks/h1");
+  assert.equal(res.reused, true, "다시 쓴 것인지 부르는 쪽이 알아야 한다");
+  assert.equal(server.created.length, 0, "자리를 옮길 때마다 웹훅이 하나씩 늘던 것이 이 문제였다");
+});
+
+test("쓸 수 있는 웹훅이 없으면 예전처럼 새로 만든다", async () => {
+  const { MM, server } = loadWithServer({ hooks: [] });
+
+  const res = await MM.provisionPersonalWebhook();
+
+  assert.equal(res.webhookUrl, "https://meeting.ssafy.com/hooks/new1");
+  assert.equal(res.reused, false);
+  assert.equal(server.created.length, 1);
+});
+
+test("남의 웹훅이나 손으로 만든 웹훅은 물려받지 않는다", async () => {
+  // 목록에는 권한에 따라 남의 것이 섞여 올 수 있다. 남의 웹훅을 물려받으면
+  // 내 알림이 그 사람 이름으로 나가고, 정리할 때 남의 것을 지우게 된다.
+  const { MM, server } = loadWithServer({
+    hooks: [
+      myHook("other", { user_id: "u2" }), // 남의 것
+      myHook("manual", { display_name: "내가 손으로 만든 것" }), // 이 확장이 만든 게 아님
+      myHook("locked", { channel_locked: true }), // 잠긴 웹훅으로는 DM을 못 보낸다
+      myHook("elsewhere", { channel_id: "c9" }), // 살아 있는지 알 수 없는 채널
+    ],
+  });
+
+  const res = await MM.provisionPersonalWebhook();
+
+  assert.equal(res.reused, false, "하나도 물려받으면 안 된다");
+  assert.equal(server.created.length, 1, "대신 새로 만들어야 한다");
+});
+
+test("목록을 못 읽는 계정은 예전처럼 새로 만든다", async () => {
+  // 여기서 막히면 설정 자체를 못 하게 된다. 재사용은 덤이지 관문이 아니다.
+  const { MM, server } = loadWithServer({ hooks: [myHook("h1")], listStatus: 403 });
+
+  const res = await MM.provisionPersonalWebhook();
+
+  assert.equal(res.webhookUrl, "https://meeting.ssafy.com/hooks/new1");
+  assert.equal(server.created.length, 1);
+});
+
+test("정리하면 지금 쓰는 것만 남기고 내 웹훅을 지운다", async () => {
+  const { MM, server } = loadWithServer({
+    hooks: [myHook("h1"), myHook("h2"), myHook("h3"), myHook("h4"), myHook("h5")],
+  });
+
+  const res = await MM.cleanupMyWebhooks("https://meeting.ssafy.com/hooks/h3");
+
+  assert.equal(res.found, 5);
+  assert.equal(res.deleted, 4);
+  assert.equal(res.keptId, "h3", "지금 쓰는 것을 지우면 이 PC의 알림까지 끊긴다");
+  assert.deepEqual(server.deleted.sort(), ["h1", "h2", "h4", "h5"]);
+});
+
+test("정리는 남의 웹훅과 손으로 만든 웹훅을 건드리지 않는다", async () => {
+  const { MM, server } = loadWithServer({
+    hooks: [
+      myHook("mine1"),
+      myHook("mine2"),
+      myHook("other", { user_id: "u2" }),
+      myHook("manual", { display_name: "내 개인 알림" }),
+    ],
+  });
+
+  const res = await MM.cleanupMyWebhooks("https://meeting.ssafy.com/hooks/mine1");
+
+  assert.equal(res.found, 2, "내가 이 확장으로 만든 것만 센다");
+  assert.deepEqual(server.deleted, ["mine2"]);
+});
+
+test("세어보기(dryRun)는 아무것도 지우지 않는다", async () => {
+  // 팝업은 몇 개가 지워지는지 먼저 보여주고, 한 번 더 눌러야 지운다.
+  const { MM, server } = loadWithServer({ hooks: [myHook("h1"), myHook("h2"), myHook("h3")] });
+
+  const res = await MM.cleanupMyWebhooks("https://meeting.ssafy.com/hooks/h1", { dryRun: true });
+
+  assert.equal(res.found, 3);
+  assert.equal(res.extras, 2, "몇 개가 지워지는지 미리 알려줘야 한다");
+  assert.equal(res.deleted, 0);
+  assert.deepEqual(server.deleted, [], "세어보기만 해도 지워지면 되돌릴 수 없다");
+});
+
+test("지금 쓰는 웹훅이 목록에 없어도 하나는 남긴다", async () => {
+  // 이미 지워졌거나 다른 계정 것일 수 있다. 전부 지워버리면 남는 게 없다.
+  const { MM, server } = loadWithServer({
+    hooks: [myHook("old2", { create_at: 200 }), myHook("old1", { create_at: 100 })],
+  });
+
+  const res = await MM.cleanupMyWebhooks("https://meeting.ssafy.com/hooks/사라진것");
+
+  assert.equal(res.keptId, "old1", "가장 먼저 만든 것을 남긴다");
+  assert.deepEqual(server.deleted, ["old2"]);
+});
+
+test("여러 팀에 걸린 웹훅도 빠뜨리지 않는다", async () => {
+  const { MM, server } = loadWithServer({
+    teams: [
+      { id: "t1", name: "a" },
+      { id: "t2", name: "b" },
+    ],
+    hooks: [myHook("h1"), myHook("h2")],
+  });
+
+  // 가짜 서버는 팀과 무관하게 같은 목록을 주므로, 팀 수만큼 조회가 나가고
+  // 같은 웹훅이 두 번 보인다. 팀을 하나만 보고 끝내지 않는다는 것과, 그렇게
+  // 겹쳐 보여도 같은 것을 두 번 지우려 들지 않는다는 것을 함께 본다.
+  const res = await MM.cleanupMyWebhooks("https://meeting.ssafy.com/hooks/h1");
+
+  const listCalls = server.calls.filter((c) => c.includes("/hooks/incoming?"));
+  assert.equal(listCalls.length, 2, "팀을 하나만 보면 다른 팀의 웹훅이 조용히 남는다");
+  assert.equal(res.found, 2, "같은 웹훅이 겹쳐 보여도 두 개로 세면 안 된다");
+  assert.deepEqual(server.deleted, ["h2"], "같은 것을 두 번 지우려 들면 두 번째가 실패로 잡힌다");
+  assert.equal(res.failed, 0);
+});
+
+test("hookIdOf 는 우리 웹훅 주소에서만 id를 떼어낸다", () => {
+  const { MM } = loadWithServer({});
+  assert.equal(MM.hookIdOf("https://meeting.ssafy.com/hooks/abc123"), "abc123");
+  assert.equal(MM.hookIdOf("  https://meeting.ssafy.com/hooks/abc123  "), "abc123");
+  assert.equal(MM.hookIdOf("https://evil.example.com/hooks/abc123"), "", "남의 도메인은 받지 않는다");
+  assert.equal(MM.hookIdOf(""), "");
+  assert.equal(MM.hookIdOf(null), "");
+});

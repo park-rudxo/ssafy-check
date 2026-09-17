@@ -238,6 +238,51 @@ test("주인이 다르면 배너로 알린다", async () => {
   }
 });
 
+// ── 떠난 자리를 정리한 뒤의 안내 ─────────────────────────────────────
+// 주인이 하루 동안 안 보이는 PC에 다른 계정이 앉으면 백그라운드가 그 PC의
+// 개인 설정을 지운다. 지우고 나면 확장은 갓 설치한 것과 똑같아지는데, 지금
+// 앉은 사람에게 아무 설명이 없으면 그냥 고장 난 것으로 보인다.
+//
+// 정리 안내는 그날 하루만 뜬다. 개발자 모드는 시각(분)만 가상으로 바꾸고
+// 날짜는 실제 시계를 그대로 쓰므로(content.js 의 serverNow), 여기서도 오늘
+// 날짜를 그대로 넣어 준다.
+function todayStr(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+test("설정을 정리한 날에는 그 사실을 배너로 알린다", async () => {
+  const { page, pageErrors } = await openPage(
+    { checkedIn: "false", time: 8 * 60 + 30 },
+    { eduHandover: { date: todayStr(), from: "홍길동" } }
+  );
+  try {
+    await page.waitForTimeout(1500);
+    const text = await bannerText(page);
+    assert.equal(pageErrors.length, 0, "페이지 에러: " + pageErrors.join(" | "));
+    assert.match(text, /정리했어요/, "왜 설정이 비어 있는지 알려줘야 한다");
+    assert.match(text, /홍길동/, "누구 설정을 지웠는지 적어야 한다");
+    assert.match(text, /새로 연결/, "다음에 뭘 해야 하는지까지 알려줘야 한다");
+    assert.equal((await page.$$(".ssafy-alert-box")).length, 1, "지금 앉은 사람도 입실은 눌러야 한다");
+  } finally {
+    await page.close();
+  }
+});
+
+test("정리 안내는 그날 하루만 뜬다", async () => {
+  // 남겨두면 며칠이고 같은 문구가 화면을 차지한다. 이미 자기 계정으로 연결한
+  // 사람에게는 그게 그냥 고장난 배너로 보인다.
+  const { page } = await openPage(
+    { checkedIn: "false", time: 8 * 60 + 30 },
+    { eduHandover: { date: todayStr(new Date(Date.now() - 86400000)), from: "홍길동" } }
+  );
+  try {
+    await page.waitForTimeout(1500);
+    assert.doesNotMatch(await bannerText(page), /정리했어요/);
+  } finally {
+    await page.close();
+  }
+});
+
 // 설정을 마쳤는데도 "설정을 마쳐야 동작합니다" 배너가 뜨던 버그의 회귀 테스트.
 // content.js 가 사용자명 규칙을 따로 옮겨 적고 있었는데, mattermost.js 쪽만
 // "숫자로 시작하는 아이디 허용"으로 완화되면서 규칙이 갈라졌다. 그래서 자동

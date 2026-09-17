@@ -43,13 +43,23 @@
   // 백그라운드가 정해서 저장하고, 여기서는 읽기만 한다. (아래 pageAccount 참고)
   let eduAccount = null;
 
+  // 주인이 떠난 것으로 보고 이 PC의 설정을 지운 기록. 지우고 나면 확장은
+  // 갓 설치한 것과 똑같은 상태가 되는데, 지금 앉은 사람 입장에서는 아무
+  // 설명이 없으면 그냥 고장 난 것으로 보인다. 그날 하루는 이유를 띄운다.
+  let eduHandover = null;
+
+  // 이 스크립트가 따라보는 저장소 키. 읽을 때와 바뀜을 볼 때가 갈라지면,
+  // 새 키를 한쪽에만 넣어놓고 "설정을 바꿔도 화면이 안 바뀐다"를 만나게 된다.
+  const WATCHED_KEYS = ["ssafyDev", "dayOff", "mattermost", "eduAccount", "eduHandover"];
+
   function loadDevSettings(cb) {
     try {
-      chrome.storage.local.get(["ssafyDev", "dayOff", "mattermost", "eduAccount"], (data) => {
+      chrome.storage.local.get(WATCHED_KEYS, (data) => {
         dev = { ...DEV_DEFAULTS, ...(data && data.ssafyDev) };
         dayOff = { ...DAYOFF_DEFAULTS, ...(data && data.dayOff) };
         mm = (data && data.mattermost) || null;
         eduAccount = (data && data.eduAccount) || null;
+        eduHandover = (data && data.eduHandover) || null;
         if (cb) cb();
       });
     } catch (e) {
@@ -60,11 +70,12 @@
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
-      if (!changes.ssafyDev && !changes.dayOff && !changes.mattermost && !changes.eduAccount) return;
+      if (!WATCHED_KEYS.some((k) => changes[k])) return;
       if (changes.ssafyDev) dev = { ...DEV_DEFAULTS, ...changes.ssafyDev.newValue };
       if (changes.dayOff) dayOff = { ...DAYOFF_DEFAULTS, ...changes.dayOff.newValue };
       if (changes.mattermost) mm = changes.mattermost.newValue || null;
       if (changes.eduAccount) eduAccount = changes.eduAccount.newValue || null;
+      if (changes.eduHandover) eduHandover = changes.eduHandover.newValue || null;
       update();
     });
   } catch (e) {
@@ -379,6 +390,16 @@
     }
 
     return "";
+  }
+
+  // 오늘 이 PC를 정리했으면 그 사실을 알리는 문구. 아니면 빈 문자열.
+  function handoverNotice() {
+    if (!eduHandover || eduHandover.date !== todayStr()) return "";
+    const from = eduHandover.from ? `${eduHandover.from}님의 ` : "";
+    return (
+      `🧹 이 크롬에 남아 있던 ${from}출석 알리미 설정을 정리했어요. ` +
+      `지금은 알림이 아무에게도 가지 않습니다 — 확장 아이콘을 눌러 내 계정으로 새로 연결하세요.`
+    );
   }
 
   // 이 브라우저에 연결된 주인(eduAccount.name)과 지금 화면의 계정이 다르면
@@ -828,6 +849,10 @@
       return;
     }
 
+    // 정리 안내가 가장 먼저다. 설정이 사라진 이유를 모르면 그 아래 어떤
+    // 안내도 "확장이 고장 났다"로 읽힌다.
+    accountNotice = handoverNotice();
+
     // ── Mattermost 설정이 끝나기 전에는 강조를 켜지 않는다 ──────────────
     // 화면 강조는 이 페이지를 열어놓고 있을 때만 보인다. 자리를 비우거나
     // 탭을 닫으면 아무 소용이 없고, 정작 놓치는 상황이 바로 그때다. 폰으로
@@ -850,9 +875,11 @@
     // 주인에게만 가므로 그 사실만 배너로 알린다. (쉬는 날·강조가 꺼진
     // 시간대에는 여기까지 오지 않아 조용하다)
     const owner = otherOwnerName();
-    accountNotice = owner
-      ? `👤 이 크롬에는 ${owner}님의 출석 알리미가 연결돼 있어요. 지금 로그인한 계정의 알림은 오지 않습니다 — 본인 크롬에 확장을 설치해 설정하세요.`
-      : "";
+    if (!accountNotice) {
+      accountNotice = owner
+        ? `👤 이 크롬에는 ${owner}님의 출석 알리미가 연결돼 있어요. 지금 로그인한 계정의 알림은 오지 않습니다 — 본인 크롬에 확장을 설치해 설정하세요.`
+        : "";
+    }
 
     const now = nowMinutes();
     const checkedIn = isCheckedIn();

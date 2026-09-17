@@ -323,7 +323,9 @@ function numOrNull(v) {
 // 읽을 수 없어 물어볼 방법이 없고, 확장을 깐 사람이 자기 크롬에서 처음
 // 출석을 여는 것이 정상 경로다. 잘못 잡혔을 때를 위해 팝업에 다시 지정하는
 // 버튼을 두고, Mattermost를 다시 연결하면 자동으로 풀린다.
-const EDU_ACCOUNT_DEFAULT = { name: "", boundAt: "" };
+// lastSeenAt: 이 PC에서 주인을 마지막으로 본 날. 아래 "떠난 자리" 판정이
+// 이 날짜 하나에 걸려 있다.
+const EDU_ACCOUNT_DEFAULT = { name: "", boundAt: "", lastSeenAt: "" };
 
 async function getEduAccount() {
   const { eduAccount } = await chrome.storage.local.get("eduAccount");
@@ -345,14 +347,25 @@ async function checkEduOwner(reported) {
   const name = accountName(reported);
   if (!name) return { ok: true };
 
+  const today = todayStr();
   const acct = await getEduAccount();
   if (!acct.name) {
-    await chrome.storage.local.set({ eduAccount: { name, boundAt: todayStr() } });
+    await chrome.storage.local.set({ eduAccount: { name, boundAt: today, lastSeenAt: today } });
     SsafyDebug.log("계정", "이 브라우저의 주인으로 기억함", { name });
     return { ok: true };
   }
-  if (acct.name === name) return { ok: true };
-  return { ok: false, mine: acct.name, theirs: name };
+  if (acct.name === name) {
+    // 주인을 본 날을 남긴다. 화면을 볼 때마다 보고가 오므로 날짜가 바뀔
+    // 때만 쓴다.
+    if (acct.lastSeenAt !== today) await chrome.storage.local.set({ eduAccount: { ...acct, lastSeenAt: today } });
+    return { ok: true };
+  }
+
+  // lastSeenAt 이 없으면 이 기능이 생기기 전에 저장된 주인이다. 확장이
+  // 업데이트된 것만으로 남의 설정이 지워지는 일이 없도록 "오늘 본 것"으로
+  // 쳐서, 업데이트 당일은 예전과 똑같이 동작하게 둔다.
+  const lastSeen = acct.lastSeenAt || today;
+  return { ok: false, mine: acct.name, theirs: name, left: lastSeen !== today };
 }
 
 // 남의 출석을 무시했다는 사실은 조용히 넘기면 안 된다. 주인은 "완료 알림이
@@ -386,6 +399,85 @@ async function warnEduOwnerMismatch(mine, theirs) {
   );
 }
 
+// ── 떠난 자리 정리 ────────────────────────────────────────────────────
+// 싸피는 자리 이동이 잦은데, 크롬 기록을 지워도 확장과 확장의 저장소는 그대로
+// 남는다. 그래서 자리를 옮길 때마다 내가 쓰던 PC마다 내 웹훅 토큰이 하나씩
+// 살아남고, 그 PC에 다음 사람이 앉는다. 남의 출석을 안 알리는 것만으로는
+// 부족하다 - 애초에 내 설정이 그 PC에 남아 있으면 안 된다.
+//
+// 그래서 "주인이 오늘 한 번도 안 보인 PC에서 다른 계정이 보이면" 주인은 이
+// 자리를 떠난 것으로 보고 이 PC에 남은 개인 설정을 지운다. 주인은 자기 PC
+// 에서는 매일 아침 출석 화면을 열기 때문에, 이 조건이 곧 "하루"다. 옮긴
+// 당일에 다음 사람이 앉아도 그날은 주인을 이미 봤으니 지우지 않고, 그
+// 다음날 첫 접속에 지워진다.
+//
+// 순서가 중요하다. 웹훅을 먼저 지우면 주인에게 알릴 길이 사라져서, 주인은
+// "알림이 왜 안 오지"도 모른 채 그날 퇴실을 놓친다. 반드시 먼저 알리고 지운다.
+const HANDOVER_KEYS = ["mattermost", "eduAccount", "attendance", "mmSent", "dayOff"];
+
+// 보고가 연달아 오면 정리가 두 번 돌 수 있다. 첫 번째 것만 쓴다.
+let handoverInFlight = null;
+
+async function handOverBrowser(mine, theirs) {
+  if (handoverInFlight) return handoverInFlight;
+  handoverInFlight = (async () => {
+    SsafyDebug.log("계정", "주인이 떠난 자리로 보고 설정을 지움", { mine, theirs });
+
+    // 1. 먼저 주인에게 알린다 (웹훅이 아직 살아 있을 때).
+    const s = await getMattermost();
+    if (s.enabled && SsafyMattermost.isValidTarget(s.channel)) {
+      await postToMattermost(
+        `🧹 **쓰시던 PC에 남아 있던 설정을 지웠어요**\n` +
+          `그 PC에는 오늘 **${theirs}**님이 로그인했고, **${mine}**님은 하루 동안 한 번도 보이지 않았어요. ` +
+          `자리를 옮기신 것으로 보고 **그 PC에 남아 있던 알림 설정(웹훅)을 지웠습니다.**\n` +
+          `⚠️ **그 PC에서 오는 알림은 이제 없습니다.** 지금 쓰시는 PC의 크롬에 확장을 설치하고 연결하세요. ` +
+          `(아직 그 PC를 쓰신다면 그 PC에서 다시 연결하면 됩니다)\n${SSAFY_HOME}`,
+        s
+      );
+    }
+
+    // 2. 그 자리에 앉은 사람에게도 알린다.
+    try {
+      chrome.notifications.create("ssafy-handover-" + Date.now(), {
+        type: "basic",
+        iconUrl: "icons/icon128.png",
+        title: "이전 사용자의 설정을 정리했어요",
+        message: `이 크롬에 남아 있던 ${mine}님의 출석 알리미 설정을 지웠습니다. 내 알림을 받으려면 확장 아이콘을 눌러 새로 연결하세요.`,
+        priority: 2,
+      });
+    } catch (e) {
+      /* 알림 권한이 없어도 아래 정리는 그대로 한다 */
+    }
+
+    // 3. 이제 지운다. 지우는 것들:
+    //    mattermost - 웹훅 토큰. 이게 남는 것이 이 기능이 막으려는 사고다.
+    //    eduAccount - 주인. 지워야 다음 사람이 자연스럽게 주인이 된다.
+    //    attendance - 주인의 오늘치 출석 상태.
+    //    mmSent     - 주인 기준의 "오늘 이미 보냄" 기록.
+    //    dayOff     - 주인이 등록한 연차. 남겨두면 다음 사람이 그날 알림을
+    //                 통째로 못 받는데, 본인은 이유조차 알 수 없다.
+    // ssafyDev·autoOpen 은 개인 정보가 아니라 화면 취향이라 남긴다.
+    await chrome.storage.local.remove(HANDOVER_KEYS);
+    await chrome.storage.local.set({ eduHandover: { date: todayStr(), from: mine } });
+  })();
+  try {
+    return await handoverInFlight;
+  } finally {
+    handoverInFlight = null;
+  }
+}
+
+// 주인이 아닌 계정의 보고를 되돌려보낸다. 주인을 오늘 봤는지에 따라
+// "잠깐 남이 앉았다"와 "주인이 떠났다"가 갈린다.
+async function refuseOtherAccount(owner) {
+  if (owner.left) {
+    await handOverBrowser(owner.mine, owner.theirs);
+    return { ok: false, ignored: "handover" };
+  }
+  await warnEduOwnerMismatch(owner.mine, owner.theirs);
+  return { ok: false, ignored: "other-account" };
+}
+
 async function getAttendance() {
   const { attendance } = await chrome.storage.local.get("attendance");
   const a = { ...ATTENDANCE_DEFAULT, ...(attendance || {}) };
@@ -417,10 +509,7 @@ async function handleAttendanceRecorded(msg) {
   // 막아야 하는 이유: 남의 입실을 오늘치로 저장해두면 "아직 입실 안 했어요"
   // 경고가 멎어서, 주인은 완료 알림도 못 받고 경고도 못 받는다.
   const owner = await checkEduOwner(msg.account);
-  if (!owner.ok) {
-    await warnEduOwnerMismatch(owner.mine, owner.theirs);
-    return { ok: false, ignored: "other-account" };
-  }
+  if (!owner.ok) return refuseOtherAccount(owner);
 
   const a = await getAttendance();
   a.date = todayStr();
@@ -472,10 +561,7 @@ async function handleAttendanceObserved(msg) {
   // 위젯에 찍힌 시각도 결국 "지금 로그인한 사람"의 것이다. 주인이 아니면
   // 그 사람의 출석 상태를 주인의 오늘치로 덮어쓰면 안 된다.
   const owner = await checkEduOwner(msg.account);
-  if (!owner.ok) {
-    await warnEduOwnerMismatch(owner.mine, owner.theirs);
-    return { ok: false, ignored: "other-account" };
-  }
+  if (!owner.ok) return refuseOtherAccount(owner);
 
   const a = await getAttendance();
   SsafyDebug.log("보고", "위젯 관찰 도착", {

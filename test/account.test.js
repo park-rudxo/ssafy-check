@@ -40,6 +40,9 @@ function loadBackground() {
       return { ok: true, status: 200, text: async () => "", json: async () => ({}) };
     },
     chrome: {
+      windows: {
+        async create(opts) { tabs.push(opts); return { id: 1 }; },
+      },
       alarms: { create() {}, clear() {}, onAlarm: listeners },
       tabs: {
         create(opts) {
@@ -145,6 +148,17 @@ function run(...calls) {
   });
 }
 
+test("계정 불일치 보고가 반복되어도 재연결 팝업은 한 번만 열린다", async () => {
+  const { sandbox, store, tabs } = loadBackground();
+  const owner = { mine: "홍길동", theirs: "김철수" };
+  await run(() => sandbox.promptMattermostReconnect(owner), () => sandbox.promptMattermostReconnect(owner));
+  await run(() => sandbox.promptMattermostReconnect(owner));
+  assert.equal(tabs.length, 1);
+  assert.equal(tabs[0].type, "popup");
+  assert.match(tabs[0].url, /welcome\.html\?reason=account-mismatch$/);
+  assert.ok(store.eduReconnectPrompt);
+});
+
 test("처음 본 계정을 이 브라우저의 주인으로 기억한다", async () => {
   const { sandbox, store, posts } = loadBackground();
 
@@ -155,11 +169,12 @@ test("처음 본 계정을 이 브라우저의 주인으로 기억한다", async
 });
 
 test("주인이 아닌 계정의 입실은 알리지도, 오늘치로 기록하지도 않는다", async () => {
-  const { sandbox, store, posts, notes } = loadBackground();
+  const { sandbox, store, posts, notes, tabs } = loadBackground();
   store.eduAccount = { name: "홍길동", boundAt: "2026-08-24" };
 
   // B가 A의 크롬에서 자기 아이디로 로그인해 입실을 누른 상황.
   await sandbox.handleAttendanceRecorded({ kind: "checkin", minutes: 8 * 60 + 16, account: "김철수" });
+  assert.equal(tabs.filter((tab) => tab.type === "popup").length, 1, "불일치를 감지하면 연결 팝업이 즉시 열려야 한다");
 
   assert.equal(sent(posts, /입실 체크 완료/).length, 0, "남의 입실을 '완료'로 알리면 안 된다");
   assert.equal(

@@ -19,6 +19,17 @@
   let autoOpen = { ...AUTO_OPEN_DEFAULTS };
   let mm = { ...MM_DEFAULTS };
   let step = 0;
+  const reconnect = new URLSearchParams(window.location.search).get("reason") === "account-mismatch";
+
+  function showInitialStep() {
+    show(reconnect ? 1 : 0);
+    if (reconnect) {
+      const notice = document.createElement("p");
+      notice.className = "sub";
+      notice.textContent = "에듀싸피 로그인 계정이 기존 연결 정보와 달라요. Mattermost 웹에서 내 계정으로 로그인한 뒤 ‘내 계정 연결하기’를 눌러주세요.";
+      document.querySelector('[data-panel="1"]').prepend(notice);
+    }
+  }
 
   const $ = (id) => document.getElementById(id);
 
@@ -264,10 +275,10 @@
         $("ao-min").value = autoOpen.minutesBefore;
         $("ao-row").classList.toggle("off", !autoOpen.enabled);
         renderMattermost();
-        show(0);
+        showInitialStep();
       });
     } catch (e) {
-      show(0);
+      showInitialStep();
     }
   }
 

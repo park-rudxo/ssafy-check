@@ -575,7 +575,35 @@ async function handOverBrowser(mine, theirs) {
 
 // 주인이 아닌 계정의 보고를 되돌려보낸다. 주인을 오늘 봤는지에 따라
 // "잠깐 남이 앉았다"와 "주인이 떠났다"가 갈린다.
+let reconnectPromptInFlight = null;
+
+async function promptMattermostReconnect(owner) {
+  if (reconnectPromptInFlight) return reconnectPromptInFlight;
+  reconnectPromptInFlight = (async () => {
+    const key = JSON.stringify([todayStr(), owner.mine, owner.theirs]);
+    const { eduReconnectPrompt } = await chrome.storage.local.get("eduReconnectPrompt");
+    if (eduReconnectPrompt === key) return;
+    await chrome.windows.create({
+      url: chrome.runtime.getURL("welcome.html?reason=account-mismatch"),
+      type: "popup",
+      width: 620,
+      height: 800,
+      focused: true,
+    });
+    await chrome.storage.local.set({ eduReconnectPrompt: key });
+  })();
+  try {
+    await reconnectPromptInFlight;
+  } catch (e) {
+    SsafyDebug.log("계정", "계정 연결 창을 열지 못함", { error: String(e) });
+  } finally {
+    reconnectPromptInFlight = null;
+  }
+}
+
 async function refuseOtherAccount(owner) {
+  // 출석 알림과 별개로, 쉬는 날에도 현재 사용자에게 재연결을 안내한다.
+  await promptMattermostReconnect(owner);
   // 쉬는 날에는 알리지도, 정리하지도 않는다.
   //
   // 보고 자체는 쉬는 날에도 올라온다(헛경고를 막으려면 백그라운드가 아는

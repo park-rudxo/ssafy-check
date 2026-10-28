@@ -69,14 +69,16 @@ function loadBackground() {
           },
         },
         local: {
-          async get(keys) {
+          async get(keys, callback) {
             const list = typeof keys === "string" ? [keys] : keys;
             const out = {};
             for (const k of list) if (k in store) out[k] = store[k];
+            if (callback) callback(out);
             return out;
           },
-          async set(obj) {
+          async set(obj, callback) {
             Object.assign(store, obj);
+            if (callback) callback();
           },
           // 진짜 chrome.storage 는 키 하나든 배열이든 받는다. 한쪽만
           // 흉내 내면 여러 키를 한 번에 지우는 코드가 테스트에서만 조용히
@@ -148,15 +150,13 @@ function run(...calls) {
   });
 }
 
-test("계정 불일치 보고가 반복되어도 재연결 팝업은 한 번만 열린다", async () => {
+test("계정 불일치 보고가 반복되어도 방해하는 팝업은 열지 않는다", async () => {
   const { sandbox, store, tabs } = loadBackground();
   const owner = { mine: "홍길동", theirs: "김철수" };
-  await run(() => sandbox.promptMattermostReconnect(owner), () => sandbox.promptMattermostReconnect(owner));
-  await run(() => sandbox.promptMattermostReconnect(owner));
-  assert.equal(tabs.length, 1);
-  assert.equal(tabs[0].type, "popup");
-  assert.match(tabs[0].url, /welcome\.html\?reason=account-mismatch$/);
-  assert.ok(store.eduReconnectPrompt);
+  await run(() => sandbox.refuseOtherAccount(owner), () => sandbox.refuseOtherAccount(owner));
+  await run(() => sandbox.refuseOtherAccount(owner));
+  assert.equal(tabs.length, 0);
+  assert.equal(store.accountPaused.theirs, "김철수");
 });
 
 test("처음 본 계정을 이 브라우저의 주인으로 기억한다", async () => {
@@ -174,7 +174,7 @@ test("주인이 아닌 계정의 입실은 알리지도, 오늘치로 기록하�
 
   // B가 A의 크롬에서 자기 아이디로 로그인해 입실을 누른 상황.
   await sandbox.handleAttendanceRecorded({ kind: "checkin", minutes: 8 * 60 + 16, account: "김철수" });
-  assert.equal(tabs.filter((tab) => tab.type === "popup").length, 1, "불일치를 감지하면 연결 팝업이 즉시 열려야 한다");
+  assert.equal(tabs.filter((tab) => tab.type === "popup").length, 0, "계정 안내는 작은 카드로 표시하고 팝업은 자동으로 열지 않는다");
 
   assert.equal(sent(posts, /입실 체크 완료/).length, 0, "남의 입실을 '완료'로 알리면 안 된다");
   assert.equal(
@@ -183,12 +183,9 @@ test("주인이 아닌 계정의 입실은 알리지도, 오늘치로 기록하�
     "남의 입실을 내 오늘치로 저장하면 '아직 입실 안 했어요' 경고까지 멎는다"
   );
 
-  // 조용히 버리기만 하면 주인은 아무것도 모른 채 하루를 보낸다.
-  assert.equal(sent(posts, /다른 계정/).length, 1, "주인에게 사정을 한 번은 알려야 한다");
-  assert.equal(notes.length, 1, "그 자리에 앉은 사람에게도 크롬 알림으로 알려야 한다");
-  const text = textOf(sent(posts, /다른 계정/)[0]);
-  assert.match(text, /홍길동/, "누구의 크롬인지 적어야 한다");
-  assert.match(text, /김철수/, "지금 누가 로그인해 있는지 적어야 한다");
+  assert.equal(posts.length, 0, "다른 사람에게 계정 안내 메시지를 보내지 않는다");
+  assert.equal(notes.length, 0);
+  assert.equal(store.accountPaused.theirs, "김철수");
 });
 
 test("주인이 아닌 계정의 위젯 관찰도 내 상태를 덮어쓰지 않는다", async () => {
@@ -213,8 +210,8 @@ test("경고는 하루 한 번만 간다 (화면을 볼 때마다 보고가 온�
     await sandbox.handleAttendanceObserved({ checkinMin: 8 * 60 + 16, checkoutMin: null, account: "김철수" });
   }
 
-  assert.equal(sent(posts, /다른 계정/).length, 1, "같은 사정을 반복해서 보내면 그게 새로운 소음이 된다");
-  assert.equal(notes.length, 1);
+  assert.equal(sent(posts, /다른 계정/).length, 0, "같은 사정을 반복해서 보내면 그게 새로운 소음이 된다");
+  assert.equal(notes.length, 0);
 });
 
 test("이름을 못 읽으면 예전처럼 그대로 알린다", async () => {
@@ -240,120 +237,90 @@ test("주인 본인의 출석은 그대로 알린다", async () => {
   assert.equal(sent(posts, /다른 계정/).length, 0);
 });
 
-// ── 떠난 자리 정리 ────────────────────────────────────────────────────
-// 자리를 옮겨도 확장과 확장의 저장소는 그 PC에 그대로 남는다(크롬 기록을
-// 지워도 마찬가지다). 그래서 옮겨 다닌 PC마다 내 웹훅 토큰이 하나씩 살아남고
-// 그 자리에 다음 사람이 앉는다. 주인이 하루 동안 한 번도 안 보이는데 다른
-// 계정이 쓰고 있으면, 주인은 떠난 것으로 보고 그 PC의 개인 설정을 지운다.
-//
-// 아래 테스트들은 await 대신 run() 을 쓴다 (이유는 run() 의 주석 참고).
+// 자리 이동 시 삭제 대신 중지하고, 본인이 돌아오면 원래 설정을 재사용한다.
+const YESTERDAY = "2026-08-24";
+const 남의출석 = { checkinMin: 496, checkoutMin: null, account: "김철수" };
 
-const YESTERDAY = "2026-08-24"; // 오늘일 리 없는 날짜
-const 남의출석 = { checkinMin: 8 * 60 + 16, checkoutMin: null, account: "김철수" };
-
-test("주인이 오늘 안 보인 PC에 다른 계정이 앉으면 개인 설정을 지운다", async () => {
-  const { sandbox, store, notes } = loadBackground();
-  store.eduAccount = { name: "홍길동", boundAt: YESTERDAY, lastSeenAt: YESTERDAY };
-  store.attendance = { date: YESTERDAY, checkinMin: 500 };
-  store.dayOff = { offDays: ["2026-09-01"], workDays: [] };
-
-  await run(() => sandbox.handleAttendanceObserved(남의출석));
-
-  assert.equal(store.mattermost, undefined, "웹훅 토큰이 남의 PC에 살아 있으면 안 된다");
-  assert.equal(store.eduAccount, undefined, "주인을 지워야 다음 사람이 자연스럽게 주인이 된다");
-  assert.equal(store.attendance, undefined, "주인의 출석 상태도 남기지 않는다");
-  assert.equal(
-    store.dayOff,
-    undefined,
-    "주인의 연차가 남으면 다음 사람은 그날 알림을 통째로 못 받고 이유도 알 수 없다"
-  );
-  assert.equal(notes.length, 1, "그 자리에 앉은 사람에게 정리했다고 알려야 한다");
-});
-
-test("지우기 전에 주인에게 먼저 알린다", async () => {
-  // 순서가 뒤집히면 웹훅이 먼저 사라져서 알릴 길이 없어진다. 주인은 알림이
-  // 멎은 줄도 모른 채 그날 퇴실을 놓친다 - 이 확장이 막으려던 바로 그 상황이다.
-  const { sandbox, store, posts } = loadBackground();
-  store.eduAccount = { name: "홍길동", boundAt: YESTERDAY, lastSeenAt: YESTERDAY };
-
-  await run(() => sandbox.handleAttendanceObserved(남의출석));
-
-  const bye = sent(posts, /지웠어요/);
-  assert.equal(bye.length, 1, "주인은 자기 설정이 지워졌다는 것을 반드시 알아야 한다");
-  assert.match(textOf(bye[0]), /알림은 이제 없습니다/, "그 PC에서 알림이 안 온다는 사실을 적어야 한다");
-  assert.equal(sent(posts, /입실 체크 완료/).length, 0, "남의 입실을 완료로 알리면 안 된다");
-});
-
-test("주인을 오늘 봤으면 잠깐 남이 앉은 것이라 지우지 않는다", async () => {
-  const { sandbox, store, posts } = loadBackground();
-  store.eduAccount = { name: "홍길동", boundAt: YESTERDAY };
-
-  // 주인이 먼저 자기 자리에서 출석을 본다 (lastSeenAt 이 오늘로 갱신된다).
-  await run(() =>
-    sandbox.handleAttendanceObserved({ checkinMin: 8 * 60 + 16, checkoutMin: null, account: "홍길동" })
-  );
-  assert.equal(store.eduAccount.lastSeenAt, sandbox.todayStr(), "주인을 본 날을 남겨야 한다");
-
-  // 그 뒤 같은 날 남이 앉았다.
-  await run(() => sandbox.handleAttendanceObserved({ ...남의출석, checkinMin: 9 * 60 }));
-
-  assert.notEqual(store.mattermost, undefined, "주인이 오늘 쓴 PC의 설정을 지우면 안 된다");
-  assert.equal(store.eduAccount.name, "홍길동", "주인도 그대로여야 한다");
-  assert.equal(sent(posts, /지웠어요/).length, 0);
-  assert.equal(sent(posts, /다른 계정/).length, 1, "대신 예전처럼 사정만 알린다");
-});
-
-test("확장을 업데이트한 것만으로는 지우지 않는다", async () => {
-  // lastSeenAt 은 이 기능과 함께 생겼다. 그 전에 저장된 주인에게는 이 값이
-  // 없는데, 이것을 "오래 안 보였다"로 읽으면 업데이트 당일 남이 잠깐
-  // 앉기만 해도 멀쩡한 설정이 날아간다.
-  const { sandbox, store, posts } = loadBackground();
-  store.eduAccount = { name: "홍길동", boundAt: YESTERDAY }; // lastSeenAt 없음
-
-  await run(() => sandbox.handleAttendanceObserved(남의출석));
-
-  assert.notEqual(store.mattermost, undefined, "업데이트 당일은 예전과 똑같이 동작해야 한다");
-  assert.equal(sent(posts, /지웠어요/).length, 0);
-  assert.equal(sent(posts, /다른 계정/).length, 1);
-});
-
-test("보고가 연달아 와도 한 번만 정리한다", async () => {
-  // SSAFY 탭을 여러 개 열어두면 같은 보고가 거의 동시에 여러 번 온다.
+test("자리 이동을 감지해도 개인 설정과 휴무일을 삭제하지 않는다", async () => {
   const { sandbox, store, posts, notes } = loadBackground();
-  store.eduAccount = { name: "홍길동", boundAt: YESTERDAY, lastSeenAt: YESTERDAY };
-
-  await run(
-    () => sandbox.handleAttendanceObserved(남의출석),
-    () => sandbox.handleAttendanceObserved({ ...남의출석, checkoutMin: 18 * 60 }),
-    () => sandbox.handleAttendanceRecorded({ kind: "checkin", minutes: 8 * 60 + 16, account: "김철수" })
-  );
-
-  assert.equal(sent(posts, /지웠어요/).length, 1, "같은 작별 인사를 여러 번 보내면 안 된다");
-  assert.equal(notes.length, 1);
-  assert.equal(store.mattermost, undefined);
+  store.eduAccount = { name: "홍길동", lastSeenAt: YESTERDAY };
+  store.dayOff = { offDays: ["2026-11-02"], workDays: [] };
+  const previous = JSON.stringify(store.mattermost);
+  await sandbox.handleAttendanceObserved(남의출석);
+  assert.equal(JSON.stringify(store.mattermost), previous);
+  assert.equal(store.eduAccount.name, "홍길동");
+  assert.equal(store.dayOff.offDays[0], "2026-11-02");
+  assert.equal(store.accountPaused.theirs, "김철수");
+  assert.equal(posts.length, 0);
+  assert.equal(notes.length, 0);
 });
 
-test("정리한 사실을 그날 화면에 띄울 수 있게 남긴다", async () => {
-  // 지우고 나면 확장은 갓 설치한 것과 똑같아진다. 지금 앉은 사람에게 아무
-  // 설명이 없으면 그냥 고장 난 것으로 보인다.
+test("원래 사용자가 돌아오면 중지를 해제하고 출석을 정상 기록한다", async () => {
   const { sandbox, store } = loadBackground();
-  store.eduAccount = { name: "홍길동", boundAt: YESTERDAY, lastSeenAt: YESTERDAY };
-
-  await run(() => sandbox.handleAttendanceObserved(남의출석));
-
-  assert.equal(store.eduHandover.date, sandbox.todayStr());
-  assert.equal(store.eduHandover.from, "홍길동", "누구 설정을 정리했는지 화면에 적어야 한다");
+  store.eduAccount = { name: "홍길동", lastSeenAt: YESTERDAY };
+  await sandbox.handleAttendanceObserved(남의출석);
+  await sandbox.handleAttendanceObserved({ ...남의출석, account: "홍길동" });
+  assert.equal(store.accountPaused, null);
+  assert.equal(store.attendance.pageCheckinMin, 496);
 });
 
-test("정리한 뒤 다음 사람이 새 주인이 된다", async () => {
+test("계정 전환은 설정과 출석을 계정별로 복구하고 웹훅 토큰은 활성 계정만 보관한다", async () => {
   const { sandbox, store } = loadBackground();
-  store.eduAccount = { name: "홍길동", boundAt: YESTERDAY, lastSeenAt: YESTERDAY };
+  store.mattermost.notifyMissing = false;
+  store.dayOff = { offDays: ["2026-11-02"], workDays: [] };
+  store.attendance = { date: sandbox.todayStr(), checkinMin: 496 };
+  store.mmSent = { date: sandbox.todayStr(), keys: ["click-checkin"] };
+  const hong = { ...store.mattermost };
+  await sandbox.applyAccountConnection({ userId: "kim-id", channel: "@kim", ownerNames: ["김철수"], webhookUrl: "https://meeting.ssafy.com/hooks/kim" }, "김철수");
+  assert.equal(store.attendance, null);
+  assert.equal(store.mattermost.notifyMissing, true);
+  assert.equal(store.dayOff.offDays.length, 0);
+  assert.doesNotMatch(JSON.stringify(store.accountPreferences), /hooks\//);
+  await sandbox.applyAccountConnection(hong, "홍길동");
+  assert.equal(store.mattermost.notifyMissing, false);
+  assert.equal(store.attendance.checkinMin, 496);
+  assert.equal(store.mmSent.keys[0], "click-checkin");
+  assert.equal(store.dayOff.offDays[0], "2026-11-02");
+});
 
-  await run(() => sandbox.handleAttendanceObserved(남의출석));
-  await run(() => sandbox.handleAttendanceObserved(남의출석));
-
+test("인증된 Mattermost 세션이 일치하면 다른 자리에서 기존 연결을 자동 복구한다", async () => {
+  const { sandbox, store } = loadBackground();
+  store.eduAccount = { name: "홍길동" };
+  let calls = 0;
+  sandbox.chrome.permissions = { contains: async () => true };
+  sandbox.SsafyMattermost.restorePersonalWebhook = async name => {
+    calls++;
+    assert.equal(name, "김철수");
+    return { userId: "kim-id", channel: "@kim", ownerNames: [name], webhookUrl: "https://meeting.ssafy.com/hooks/kim" };
+  };
+  await sandbox.handleAttendanceObserved(남의출석);
+  assert.equal(calls, 1);
   assert.equal(store.eduAccount.name, "김철수");
-  assert.equal(store.eduAccount.lastSeenAt, sandbox.todayStr());
+  assert.equal(store.mattermost.channel, "@kim");
+  assert.equal(store.attendance.pageCheckinMin, 496);
+  assert.equal(store.accountPaused, null);
+});
+
+test("복구할 계정이 없으면 반복 요청을 제한하고 이전 사용자 설정을 보존한다", async () => {
+  const { sandbox, store } = loadBackground();
+  store.eduAccount = { name: "홍길동" };
+  sandbox.chrome.permissions = { contains: async () => true };
+  let calls = 0;
+  sandbox.SsafyMattermost.restorePersonalWebhook = async () => { calls++; return null; };
+  await Promise.all([sandbox.handleAttendanceObserved(남의출석), sandbox.handleAttendanceObserved(남의출석)]);
+  assert.equal(calls, 1);
+  assert.equal(store.mattermost.channel, "@hong");
+  assert.equal(store.eduAccount.name, "홍길동");
+  assert.equal(store.accountPaused.theirs, "김철수");
+});
+
+test("사용자가 꺼둔 연동은 자동 복구가 다시 켜지 않는다", async () => {
+  const { sandbox, store } = loadBackground();
+  store.mattermost.enabled = false;
+  sandbox.chrome.permissions = { contains: async () => true };
+  sandbox.SsafyMattermost.restorePersonalWebhook = async () => { throw new Error("호출되면 안 됨"); };
+  await sandbox.handleAttendanceObserved(남의출석);
+  assert.equal(store.mattermost.enabled, false);
 });
 
 // ── 주인을 "먼저 연 사람"이 아니라 연결된 계정으로 잡는다 ──────────────
@@ -382,11 +349,9 @@ test("연결된 계정이 아니면 주인으로 잡지 않는다", async () => 
     true,
     "남의 입실을 내 오늘치로 저장하면 미체크 경고까지 멎는다"
   );
-  assert.equal(notes.length, 1, "그 자리에 앉은 사람에게도 알려야 한다");
-  const warn = sent(posts, /본 적이 없어요/);
-  assert.equal(warn.length, 1, "주인은 왜 아무 알림도 안 오는지 알아야 한다");
-  assert.match(textOf(warn[0]), /김철수/, "지금 누가 로그인해 있는지 적어야 한다");
-  assert.match(textOf(warn[0]), /다시 지정하기/, "이름이 잘못 잡혔을 때의 탈출구를 알려줘야 한다");
+  assert.equal(notes.length, 0);
+  assert.equal(posts.length, 0);
+  assert.equal(store.accountPaused.mine, "홍길동");
 });
 
 test("연결된 계정 본인이면 그대로 주인이 된다", async () => {
@@ -443,11 +408,11 @@ test("경고는 하루 한 번만 간다", async () => {
     );
   }
 
-  assert.equal(sent(posts, /본 적이 없어요/).length, 1, "같은 사정을 반복해서 보내면 그게 새로운 소음이 된다");
-  assert.equal(notes.length, 1);
+  assert.equal(sent(posts, /본 적이 없어요/).length, 0, "같은 사정을 반복해서 보내면 그게 새로운 소음이 된다");
+  assert.equal(notes.length, 0);
 });
 
-test("주인이 이미 잡혀 있으면 연결된 계정 이름은 끼어들지 않는다", async () => {
+test("과거 주인 기록이 잘못되어 있어도 연결된 계정과 다르면 알림을 막는다", async () => {
   // 이름이 잘못 잡혔을 때 팝업에서 주인을 다시 지정하면 ownerNames 도 같이
   // 풀리지만, 옛 버전에서 저장된 주인이 남아 있을 수도 있다. 그때는 이미
   // 잡힌 주인이 우선이고, 판정은 예전 규칙 그대로여야 한다.
@@ -457,7 +422,8 @@ test("주인이 이미 잡혀 있으면 연결된 계정 이름은 끼어들지 
 
   await run(() => sandbox.handleAttendanceRecorded({ kind: "checkin", minutes: 8 * 60 + 16, account: "김철수" }));
 
-  assert.equal(sent(posts, /입실 체크 완료/).length, 1, "주인으로 잡힌 사람의 출석은 알린다");
+  assert.equal(sent(posts, /입실 체크 완료/).length, 0, "오래된 주인 기록보다 연결된 계정 검증이 우선이다");
+  assert.equal(store.accountPaused.theirs, "김철수");
   assert.equal(sent(posts, /본 적이 없어요/).length, 0);
 });
 
@@ -480,10 +446,9 @@ test("막았을 때 문구에는 반 정보를 빼고 이름만 쓴다", async (
 
   await run(() => sandbox.handleAttendanceRecorded({ kind: "checkin", minutes: 8 * 60 + 16, account: "김철수" }));
 
-  const warn = sent(posts, /본 적이 없어요/);
-  assert.equal(warn.length, 1);
-  assert.match(textOf(warn[0]), /박경태님/, "'박경태[서울_3반]님' 은 읽기 나쁘다");
-  assert.doesNotMatch(textOf(warn[0]), /서울_3반/);
+  assert.equal(posts.length, 0);
+  assert.equal(store.accountPaused.mine, "박경태");
+  assert.doesNotMatch(store.accountPaused.mine, /서울_3반/);
 });
 
 // ── 연결이 끝나면 출석 화면을 연다 ────────────────────────────────────
@@ -597,4 +562,80 @@ test("쉬는 날이 아니면 지금까지처럼 보낸다", async () => {
   await run(() => sandbox.handleAttendanceObserved({ checkinMin: 8 * 60 + 16, checkoutMin: null, account: "홍길동" }));
 
   assert.equal(sent(posts, /입실 체크 완료/).length, 1);
+});
+
+
+test("숨은 이전 계정 탭은 현재 계정의 알림을 중지하지 않는다", async () => {
+  const { sandbox, store } = loadBackground();
+  store.eduAccount = { name: "홍길동" };
+  const result = await sandbox.handleAttendanceObserved({ ...남의출석, visible: false });
+  assert.equal(result.ignored, "background-account");
+  assert.equal(store.accountPaused, undefined);
+  assert.equal(store.eduAccount.name, "홍길동");
+});
+
+test("권한이 없는 새 프로필은 자동 요청 없이 기존 연결을 보존한다", async () => {
+  const { sandbox, store } = loadBackground();
+  store.eduAccount = { name: "홍길동" };
+  sandbox.chrome.permissions = { contains: async () => false };
+  let calls = 0;
+  sandbox.SsafyMattermost.restorePersonalWebhook = async () => { calls++; };
+  await sandbox.handleAttendanceObserved(남의출석);
+  assert.equal(calls, 0);
+  assert.equal(store.mattermost.channel, "@hong");
+});
+
+test("복구 요청 중 수동으로 저장한 연결은 자동 복구가 덮어쓰지 않는다", async () => {
+  const { sandbox, store } = loadBackground();
+  store.eduAccount = { name: "홍길동" };
+  sandbox.chrome.permissions = { contains: async () => true };
+  sandbox.SsafyMattermost.restorePersonalWebhook = async () => {
+    store.mattermost = { ...store.mattermost, channel: "@manual" };
+    return { channel: "@kim", ownerNames: ["김철수"], webhookUrl: "https://meeting.ssafy.com/hooks/kim" };
+  };
+  await sandbox.handleAttendanceObserved(남의출석);
+  assert.equal(store.mattermost.channel, "@manual");
+});
+
+test("출석 보고가 동시에 와도 완료 메시지는 한 번만 발송된다", async () => {
+  const { sandbox, posts } = loadBackground();
+  await Promise.all(Array.from({length: 5}, () => sandbox.handleAttendanceRecorded({kind:"checkin", minutes:496, account:"홍길동"})));
+  assert.equal(sent(posts, /입실 체크 완료/).length, 1);
+});
+
+test("계정 확인이 안 되는 동안에는 기록과 완료 알림을 중지한다", async () => {
+  const { sandbox, store, posts } = loadBackground();
+  store.accountPaused = {mine:"홍길동", theirs:"김철수"};
+  await sandbox.handleAttendanceRecorded({kind:"checkin", minutes:496, account:""});
+  assert.equal(store.attendance, undefined);
+  assert.equal(sent(posts, /입실 체크 완료/).length, 0);
+});
+
+
+test("새 연결에서 다른 계정을 잠시 보았다가 본인을 확인하면 중지가 해제된다", async () => {
+  const { sandbox, store, posts } = loadBackground();
+  store.mattermost.ownerNames = ["홍길동"];
+  await sandbox.handleAttendanceObserved(남의출석);
+  assert.ok(store.accountPaused);
+  await sandbox.handleAttendanceObserved({ ...남의출석, account: "홍길동" });
+  assert.equal(store.accountPaused, null);
+  assert.equal(store.eduAccount.name, "홍길동");
+});
+
+test("자동 복구 시 출석 탭을 추가로 열지 않는다", async () => {
+  const { tabs, notifyChanged, store } = loadBackground();
+  notifyChanged({mattermost: {oldValue: null, newValue: store.mattermost}, eduAccount: {newValue: {name:"홍길동"}}});
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(tabs.length, 0);
+});
+
+test("처음 쓰는 PC도 기존 웹훅만으로 자동 연결된다", async () => {
+  const { sandbox, store } = loadBackground();
+  delete store.mattermost;
+  sandbox.chrome.permissions = {contains: async () => true};
+  sandbox.SsafyMattermost.restorePersonalWebhook = async () => ({userId:"u1", channel:"@hong", ownerNames:["홍길동"], webhookUrl:"https://meeting.ssafy.com/hooks/existing"});
+  await sandbox.handleAttendanceObserved({...남의출석, account:"홍길동"});
+  assert.equal(store.mattermost.channel, "@hong");
+  assert.equal(store.eduAccount.name, "홍길동");
+  assert.equal(store.accountPaused, null);
 });

@@ -158,7 +158,9 @@ async function scheduleAutoOpen() {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   if (changes.autoOpen) scheduleAutoOpen();
-  if (changes.mattermost) openAttendanceAfterConnect(changes.mattermost);
+  if (changes.mattermost && !(changes.eduAccount && changes.eduAccount.newValue && changes.eduAccount.newValue.name)) {
+    openAttendanceAfterConnect(changes.mattermost);
+  }
 });
 
 // ── 연결이 끝나면 출석 화면을 연다 ────────────────────────────────────
@@ -177,10 +179,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
 function openAttendanceAfterConnect(change) {
   const before = change.oldValue;
   const after = change.newValue;
-  // 연결이 "끝나지 않음 -> 끝남"으로 넘어온 순간에만 연다. 알림 종류를 켜고
+  // 최초 연결 또는 연결 계정이 바뀌었을 때 연다. 알림 종류를 켜고
   // 끄는 것도 같은 키를 건드리므로, 그때마다 탭이 열리면 안 된다.
   if (!SsafyMattermost.isConfigured(after)) return;
-  if (SsafyMattermost.isConfigured(before)) return;
+  if (SsafyMattermost.isConfigured(before) && before.channel === after.channel) return;
 
   SsafyDebug.log("계정", "연결이 끝나 출석 화면을 연다 (주인 확정용)");
   try {
@@ -380,8 +382,8 @@ function numOrNull(v) {
 // 읽을 수 없어 물어볼 방법이 없고, 확장을 깐 사람이 자기 크롬에서 처음
 // 출석을 여는 것이 정상 경로다. 잘못 잡혔을 때를 위해 팝업에 다시 지정하는
 // 버튼을 두고, Mattermost를 다시 연결하면 자동으로 풀린다.
-// lastSeenAt: 이 PC에서 주인을 마지막으로 본 날. 아래 "떠난 자리" 판정이
-// 이 날짜 하나에 걸려 있다.
+// lastSeenAt: 이 PC에서 연결된 사용자를 마지막으로 확인한 날.
+// 계정 전환 시에는 표시 이름과 인증된 Mattermost 정보를 함께 확인한다.
 const EDU_ACCOUNT_DEFAULT = { name: "", boundAt: "", lastSeenAt: "" };
 
 async function getEduAccount() {
@@ -408,229 +410,107 @@ async function expectedOwnerNames() {
 // 이름을 못 읽었으면(빈 값) 무조건 통과시킨다. 사이트 구조가 바뀌어 이름을
 // 못 읽게 되는 순간 모두의 알림이 통째로 멎는 쪽이, 어쩌다 한 번 남의 알림이
 // 가는 것보다 훨씬 나쁘기 때문이다. 확신이 설 때만 막는다.
-async function checkEduOwner(reported) {
-  const name = accountName(reported);
-  if (!name) return { ok: true };
+// 웹훅은 활성 계정 하나만 보관한다. 계정별 기록에는 토큰 없이 설정과 출석만 남긴다.
+async function applyAccountConnection(connection, name = "") {
+  const data = await chrome.storage.local.get(["mattermost", "accountPreferences", "dayOff", "attendance", "mmSent"]);
+  const previous = data.mattermost;
+  const profiles = { ...(data.accountPreferences || {}) };
+  const keyOf = cfg => cfg && (cfg.userId || cfg.channel);
+  const previousKey = keyOf(previous);
+  const nextKey = keyOf(connection);
+  if (!nextKey || !SsafyMattermost.isConfigured({ ...connection, enabled: true })) throw new Error("연결 정보를 확인하지 못했어요.");
+  if (previousKey) profiles[previousKey] = {
+    notifyCheckin: previous.notifyCheckin !== false,
+    notifyCheckout: previous.notifyCheckout !== false,
+    notifyMissing: previous.notifyMissing !== false,
+    dayOff: data.dayOff || DAYOFF_DEFAULT,
+    attendance: data.attendance || null,
+    mmSent: data.mmSent || null,
+  };
+  // 기존 버전에 userId가 없었던 경우 같은 채널의 설정을 이어받는다.
+  const prefs = profiles[nextKey] || profiles[connection.channel] || {};
+  const { dayOff, attendance, mmSent, ...notificationPrefs } = prefs;
+  const mattermost = { ...MM_DEFAULTS, ...notificationPrefs, ...connection, enabled: true };
+  await chrome.storage.local.set({
+    mattermost,
+    eduAccount: name ? { name, boundAt: todayStr(), lastSeenAt: todayStr() } : null,
+    dayOff: dayOff || DAYOFF_DEFAULT, attendance: attendance || null, mmSent: mmSent || null,
+    accountPreferences: profiles, accountPaused: null, eduHandover: null, eduReconnectPrompt: null,
+  });
+  return { ok: true, mattermost, dayOff: dayOff || DAYOFF_DEFAULT };
+}
 
+const recoveryAttempts = new Map();
+
+async function recoverAccount(name) {
+  if (!name || !chrome.permissions || !chrome.permissions.contains) return;
+  const { mattermost, eduAccount } = await chrome.storage.local.get(["mattermost", "eduAccount"]);
+  const hints = mattermost && mattermost.ownerNames || [];
+  const matches = (!eduAccount || !eduAccount.name || eduAccount.name === name) &&
+    (!hints.length || SsafyMattermost.matchesOwnerName(hints, name));
+  if (SsafyMattermost.isConfigured(mattermost) && matches) return;
+  if (mattermost && mattermost.webhookUrl && mattermost.enabled === false) return;
+  const last = recoveryAttempts.get(name) || 0;
+  if (Date.now() - last < 30000) return;
+  recoveryAttempts.set(name, Date.now());
+  if (recoveryAttempts.size > 20) recoveryAttempts.delete(recoveryAttempts.keys().next().value);
+  try {
+    if (!await chrome.permissions.contains({ origins: [SsafyMattermost.WEBHOOK_ORIGIN] })) return;
+    const restored = await SsafyMattermost.restorePersonalWebhook(name);
+    if (!restored) return;
+    // 복구 중 사용자가 저장한 설정은 덮어쓰지 않는다.
+    const current = await chrome.storage.local.get("mattermost");
+    if (JSON.stringify(current.mattermost) !== JSON.stringify(mattermost)) return;
+    await applyAccountConnection(restored, name);
+    SsafyDebug.log("계정", "로그인 세션으로 기존 연결 자동 복구", { name, channel: restored.channel });
+  } catch (error) {
+    SsafyDebug.log("계정", "자동 복구 대기", { error: String(error.message || error) });
+  }
+}
+
+async function checkEduOwner(reported, allowRecovery = true) {
+  const name = accountName(reported);
+  if (!name) return { ok: !(await chrome.storage.local.get("accountPaused")).accountPaused };
+
+  if (allowRecovery) await recoverAccount(name);
   const today = todayStr();
   const acct = await getEduAccount();
+  if (!SsafyMattermost.isConfigured(await getMattermost())) {
+    return { ok: false, mine: "", theirs: name, notOwner: true };
+  }
+  const expected = await expectedOwnerNames();
+  if (expected.length && !SsafyMattermost.matchesOwnerName(expected, name)) {
+    SsafyDebug.log("계정", "연결된 계정이 아니라 주인으로 잡지 않음", { expected, name });
+    // 문구에는 반 정보를 뺀 이름만 쓴다. "박경태[서울_3반]님" 은 읽기 나쁘다.
+    return { ok: false, mine: SsafyMattermost.displayOwnerName(expected[0]) || expected[0], theirs: name, notOwner: true };
+  }
   if (!acct.name) {
     // 주인이 아직 없다. 연결한 Mattermost 계정의 이름을 알면 그것이 주인이다 -
     // 웹훅은 본인이 로그인해서 만든 것이기 때문이다. 지금 화면의 사람이 그
     // 이름이 아니면, 연결만 해두고 아직 edu 를 열지 않은 사이에 다른 사람이
     // 앉은 것이다. 여기서 주인으로 기억해버리면 정작 본인의 출석이 그 뒤로
     // 계속 "남의 출석"으로 무시된다.
-    const expected = await expectedOwnerNames();
-    if (expected.length && !SsafyMattermost.matchesOwnerName(expected, name)) {
-      SsafyDebug.log("계정", "연결된 계정이 아니라 주인으로 잡지 않음", { expected, name });
-      // 문구에는 반 정보를 뺀 이름만 쓴다. "박경태[서울_3반]님" 은 읽기 나쁘다.
-      return { ok: false, mine: SsafyMattermost.displayOwnerName(expected[0]) || expected[0], theirs: name, notOwner: true };
-    }
-    await chrome.storage.local.set({ eduAccount: { name, boundAt: today, lastSeenAt: today } });
+    await chrome.storage.local.set({ eduAccount: { name, boundAt: today, lastSeenAt: today }, accountPaused: null });
     SsafyDebug.log("계정", "이 브라우저의 주인으로 기억함", { name });
     return { ok: true };
   }
   if (acct.name === name) {
+    const { accountPaused } = await chrome.storage.local.get("accountPaused");
+    if (accountPaused) await chrome.storage.local.set({ accountPaused: null });
     // 주인을 본 날을 남긴다. 화면을 볼 때마다 보고가 오므로 날짜가 바뀔
     // 때만 쓴다.
     if (acct.lastSeenAt !== today) await chrome.storage.local.set({ eduAccount: { ...acct, lastSeenAt: today } });
     return { ok: true };
   }
 
-  // lastSeenAt 이 없으면 이 기능이 생기기 전에 저장된 주인이다. 확장이
-  // 업데이트된 것만으로 남의 설정이 지워지는 일이 없도록 "오늘 본 것"으로
-  // 쳐서, 업데이트 당일은 예전과 똑같이 동작하게 둔다.
-  const lastSeen = acct.lastSeenAt || today;
-  return { ok: false, mine: acct.name, theirs: name, left: lastSeen !== today };
+  return { ok: false, mine: acct.name, theirs: name };
 }
 
-// 남의 출석을 무시했다는 사실은 조용히 넘기면 안 된다. 주인은 "완료 알림이
-// 왜 없지"가 아니라 "내가 아직 안 했구나"를 알아야 하고, 지금 그 PC에 앉은
-// 사람은 자기 알림이 여기로 오지 않는다는 걸 알아야 한다.
-// 하루 한 번만 알린다 (화면을 볼 때마다 보고가 오므로).
-async function warnEduOwnerMismatch(mine, theirs) {
-  SsafyDebug.log("계정", "다른 계정의 출석이라 무시함", { mine, theirs });
-  if (!(await markSentOnce("edu-account-mismatch"))) return;
-
-  try {
-    chrome.notifications.create("ssafy-account-mismatch-" + Date.now(), {
-      type: "basic",
-      iconUrl: "icons/icon128.png",
-      title: "다른 계정으로 로그인되어 있어요",
-      message: `이 크롬은 ${mine}님의 출석 알리미인데 지금 edu.ssafy.com 에는 ${theirs}님이 로그인해 있어요. ${theirs}님의 출석은 알리지 않습니다.`,
-      priority: 2,
-    });
-  } catch (e) {
-    /* 알림 권한이 없어도 아래 Mattermost 쪽은 보낸다 */
-  }
-
-  const s = await getMattermost();
-  if (!s.enabled || !SsafyMattermost.isValidTarget(s.channel)) return;
-  await postToMattermost(
-    `⚠️ **다른 계정의 출석이라 알리지 않았어요**\n` +
-      `이 크롬에 연결된 알림은 **${mine}**님 것인데, 지금 edu.ssafy.com 에는 **${theirs}**님이 로그인해 있어요.\n` +
-      `방금 감지된 입실/퇴실은 ${theirs}님의 것이라 "완료"로 알리지 않았습니다. ` +
-      `**${mine}님의 오늘 출석은 아직 그대로**이니 직접 확인하세요.\n${SSAFY_HOME}`,
-    s
-  );
-}
-
-// 연결은 해뒀는데 주인이 아직 안 잡힌 브라우저에서 다른 사람이 보일 때.
-// 조용히 넘기면 주인은 "왜 아무 알림도 안 오지"만 남고, 지금 앉은 사람은
-// 자기 알림이 여기로 오지 않는다는 것을 모른다. 하루 한 번만 알린다.
-async function warnNotOwnerYet(mine, theirs) {
-  if (!(await markSentOnce("edu-not-owner-yet"))) return;
-
-  try {
-    chrome.notifications.create("ssafy-not-owner-" + Date.now(), {
-      type: "basic",
-      iconUrl: "icons/icon128.png",
-      title: "이 크롬은 다른 사람의 출석 알리미예요",
-      message: `이 크롬에 연결된 알림은 ${mine}님 것이라 ${theirs}님의 출석은 알리지 않습니다. 내 알림을 받으려면 내 크롬에 확장을 설치해 연결하세요.`,
-      priority: 2,
-    });
-  } catch (e) {
-    /* 알림 권한이 없어도 아래 Mattermost 쪽은 보낸다 */
-  }
-
-  const s = await getMattermost();
-  if (!s.enabled || !SsafyMattermost.isValidTarget(s.channel)) return;
-  await postToMattermost(
-    `👤 **아직 이 크롬에서 ${mine}님을 본 적이 없어요**\n` +
-      `연결은 끝났는데 edu.ssafy.com 에는 **${theirs}**님이 로그인해 있어요. ` +
-      `연결한 계정이 **${mine}**님이라, ${theirs}님을 이 브라우저의 주인으로 잡지 않고 그 출석도 알리지 않았습니다.\n` +
-      `**${mine}님이 그 PC에서 한 번 출석 화면을 열면** 주인으로 잡히고 평소대로 동작합니다. ` +
-      `이름이 실제와 다르게 잡혔다면 팝업의 **👤 이 브라우저의 주인 다시 지정하기**로 푸세요.\n${SSAFY_HOME}`,
-    s
-  );
-}
-
-// ── 떠난 자리 정리 ────────────────────────────────────────────────────
-// 싸피는 자리 이동이 잦은데, 크롬 기록을 지워도 확장과 확장의 저장소는 그대로
-// 남는다. 그래서 자리를 옮길 때마다 내가 쓰던 PC마다 내 웹훅 토큰이 하나씩
-// 살아남고, 그 PC에 다음 사람이 앉는다. 남의 출석을 안 알리는 것만으로는
-// 부족하다 - 애초에 내 설정이 그 PC에 남아 있으면 안 된다.
-//
-// 그래서 "주인이 오늘 한 번도 안 보인 PC에서 다른 계정이 보이면" 주인은 이
-// 자리를 떠난 것으로 보고 이 PC에 남은 개인 설정을 지운다. 주인은 자기 PC
-// 에서는 매일 아침 출석 화면을 열기 때문에, 이 조건이 곧 "하루"다. 옮긴
-// 당일에 다음 사람이 앉아도 그날은 주인을 이미 봤으니 지우지 않고, 그
-// 다음날 첫 접속에 지워진다.
-//
-// 순서가 중요하다. 웹훅을 먼저 지우면 주인에게 알릴 길이 사라져서, 주인은
-// "알림이 왜 안 오지"도 모른 채 그날 퇴실을 놓친다. 반드시 먼저 알리고 지운다.
-const HANDOVER_KEYS = ["mattermost", "eduAccount", "attendance", "mmSent", "dayOff"];
-
-// 보고가 연달아 오면 정리가 두 번 돌 수 있다. 첫 번째 것만 쓴다.
-let handoverInFlight = null;
-
-async function handOverBrowser(mine, theirs) {
-  if (handoverInFlight) return handoverInFlight;
-  handoverInFlight = (async () => {
-    SsafyDebug.log("계정", "주인이 떠난 자리로 보고 설정을 지움", { mine, theirs });
-
-    // 1. 먼저 주인에게 알린다 (웹훅이 아직 살아 있을 때).
-    const s = await getMattermost();
-    if (s.enabled && SsafyMattermost.isValidTarget(s.channel)) {
-      await postToMattermost(
-        `🧹 **쓰시던 PC에 남아 있던 설정을 지웠어요**\n` +
-          `그 PC에는 오늘 **${theirs}**님이 로그인했고, **${mine}**님은 하루 동안 한 번도 보이지 않았어요. ` +
-          `자리를 옮기신 것으로 보고 **그 PC에 남아 있던 알림 설정(웹훅)을 지웠습니다.**\n` +
-          `⚠️ **그 PC에서 오는 알림은 이제 없습니다.** 지금 쓰시는 PC의 크롬에 확장을 설치하고 연결하세요. ` +
-          `(아직 그 PC를 쓰신다면 그 PC에서 다시 연결하면 됩니다)\n${SSAFY_HOME}`,
-        s
-      );
-    }
-
-    // 2. 그 자리에 앉은 사람에게도 알린다.
-    try {
-      chrome.notifications.create("ssafy-handover-" + Date.now(), {
-        type: "basic",
-        iconUrl: "icons/icon128.png",
-        title: "이전 사용자의 설정을 정리했어요",
-        message: `이 크롬에 남아 있던 ${mine}님의 출석 알리미 설정을 지웠습니다. 내 알림을 받으려면 확장 아이콘을 눌러 새로 연결하세요.`,
-        priority: 2,
-      });
-    } catch (e) {
-      /* 알림 권한이 없어도 아래 정리는 그대로 한다 */
-    }
-
-    // 3. 이제 지운다. 지우는 것들:
-    //    mattermost - 웹훅 토큰. 이게 남는 것이 이 기능이 막으려는 사고다.
-    //    eduAccount - 주인. 지워야 다음 사람이 자연스럽게 주인이 된다.
-    //    attendance - 주인의 오늘치 출석 상태.
-    //    mmSent     - 주인 기준의 "오늘 이미 보냄" 기록.
-    //    dayOff     - 주인이 등록한 연차. 남겨두면 다음 사람이 그날 알림을
-    //                 통째로 못 받는데, 본인은 이유조차 알 수 없다.
-    // ssafyDev·autoOpen 은 개인 정보가 아니라 화면 취향이라 남긴다.
-    await chrome.storage.local.remove(HANDOVER_KEYS);
-    await chrome.storage.local.set({ eduHandover: { date: todayStr(), from: mine } });
-  })();
-  try {
-    return await handoverInFlight;
-  } finally {
-    handoverInFlight = null;
-  }
-}
-
-// 주인이 아닌 계정의 보고를 되돌려보낸다. 주인을 오늘 봤는지에 따라
-// "잠깐 남이 앉았다"와 "주인이 떠났다"가 갈린다.
-let reconnectPromptInFlight = null;
-
-async function promptMattermostReconnect(owner) {
-  if (reconnectPromptInFlight) return reconnectPromptInFlight;
-  reconnectPromptInFlight = (async () => {
-    const key = JSON.stringify([todayStr(), owner.mine, owner.theirs]);
-    const { eduReconnectPrompt } = await chrome.storage.local.get("eduReconnectPrompt");
-    if (eduReconnectPrompt === key) return;
-    await chrome.windows.create({
-      url: chrome.runtime.getURL("welcome.html?reason=account-mismatch"),
-      type: "popup",
-      width: 620,
-      height: 800,
-      focused: true,
-    });
-    await chrome.storage.local.set({ eduReconnectPrompt: key });
-  })();
-  try {
-    await reconnectPromptInFlight;
-  } catch (e) {
-    SsafyDebug.log("계정", "계정 연결 창을 열지 못함", { error: String(e) });
-  } finally {
-    reconnectPromptInFlight = null;
-  }
-}
-
+// 계정 불일치는 페이지의 작은 안내로 표시하고 원래 사용자의 설정을 보존한다.
 async function refuseOtherAccount(owner) {
-  // 출석 알림과 별개로, 쉬는 날에도 현재 사용자에게 재연결을 안내한다.
-  await promptMattermostReconnect(owner);
-  // 쉬는 날에는 알리지도, 정리하지도 않는다.
-  //
-  // 보고 자체는 쉬는 날에도 올라온다(헛경고를 막으려면 백그라운드가 아는
-  // 상태를 최신으로 유지해야 한다). 하지만 그건 상태를 기록하는 일이고,
-  // 사람에게 무언가를 보내는 것은 별개다. 싸피는 주말에 나오지 않으므로
-  // 주말에 가는 알림은 그 자체로 헛것이다.
-  //
-  // 정리(설정 삭제)까지 함께 미루는 이유: 정리는 반드시 주인에게 먼저
-  // 알리고 지워야 한다. 알림만 막고 지우기만 하면, 주인은 설정이 사라진
-  // 것도 모르는 채 월요일을 맞는다. 하루 미루는 편이 낫다.
-  if (await isDayOff()) {
-    SsafyDebug.log("계정", "쉬는 날이라 알리지도 정리하지도 않음", { mine: owner.mine, theirs: owner.theirs });
-    return { ok: false, ignored: "day-off" };
-  }
-
-  // 주인이 아직 없는데 연결된 계정도 아닌 경우. 지울 주인이 없으니 정리는
-  // 하지 않고, 주인으로 잡지 않았다는 사실만 알린다.
-  if (owner.notOwner) {
-    await warnNotOwnerYet(owner.mine, owner.theirs);
-    return { ok: false, ignored: "not-owner-yet" };
-  }
-  if (owner.left) {
-    await handOverBrowser(owner.mine, owner.theirs);
-    return { ok: false, ignored: "handover" };
-  }
-  await warnEduOwnerMismatch(owner.mine, owner.theirs);
-  return { ok: false, ignored: "other-account" };
+  // 계정이 달라도 설정을 삭제하지 않고 이 PC의 발송만 일시 중지한다.
+  await chrome.storage.local.set({ accountPaused: { mine: owner.mine, theirs: owner.theirs } });
+  return { ok: false, ignored: "account-mismatch" };
 }
 
 async function getAttendance() {
@@ -653,7 +533,7 @@ async function markSentOnce(key) {
   return true;
 }
 
-async function handleAttendanceRecorded(msg) {
+async function recordAttendanceForAccount(msg) {
   const kind = msg.kind === "checkin" ? "checkin" : "checkout";
   const minutes = Number(msg.minutes);
   if (!Number.isFinite(minutes)) return { ok: false };
@@ -663,8 +543,8 @@ async function handleAttendanceRecorded(msg) {
   // 이 브라우저 주인의 출석이 아니면 기록도 알림도 하지 않는다. 기록까지
   // 막아야 하는 이유: 남의 입실을 오늘치로 저장해두면 "아직 입실 안 했어요"
   // 경고가 멎어서, 주인은 완료 알림도 못 받고 경고도 못 받는다.
-  const owner = await checkEduOwner(msg.account);
-  if (!owner.ok) return refuseOtherAccount(owner);
+  const owner = await checkEduOwner(msg.account, msg.visible !== false);
+  if (!owner.ok) return msg.visible === false ? { ok: false, ignored: "background-account" } : refuseOtherAccount(owner);
 
   const a = await getAttendance();
   a.date = todayStr();
@@ -684,6 +564,7 @@ async function handleAttendanceRecorded(msg) {
 // 위젯에서 읽어낸 시각)이지만 같은 열쇠로 중복을 막기 때문에, 두 경로가
 // 모두 발동해도 하루에 한 번만 간다.
 async function notifyAttendanceDone(kind, minutes) {
+  if ((await chrome.storage.local.get("accountPaused")).accountPaused) return;
   // 여기서 걸러진 이유가 곧 "왜 메시지가 안 왔는지"의 답이라, 걸러질 때마다
   // 그 이유를 남긴다. 조건 하나하나가 조용한 실패의 후보다.
   const skip = (why) => SsafyDebug.log("done", `${kind} 알림 건너뜀`, { why, minutes });
@@ -714,15 +595,15 @@ async function notifyAttendanceDone(kind, minutes) {
 }
 
 // content.js가 출석 위젯에서 읽어낸 서버 기준 시각을 반영한다.
-async function handleAttendanceObserved(msg) {
+async function observeAttendanceForAccount(msg) {
   const ci = numOrNull(msg.checkinMin);
   const co = numOrNull(msg.checkoutMin);
 
   // 위젯에 찍힌 시각도 결국 "지금 로그인한 사람"의 것이다. 주인이 아니면
   // 그 사람의 출석 상태를 주인의 오늘치로 덮어쓰면 안 된다. 아래에서 무엇을
   // 기록하든 그 전에 걸러야 한다.
-  const owner = await checkEduOwner(msg.account);
-  if (!owner.ok) return refuseOtherAccount(owner);
+  const owner = await checkEduOwner(msg.account, msg.visible !== false);
+  if (!owner.ok) return msg.visible === false ? { ok: false, ignored: "background-account" } : refuseOtherAccount(owner);
 
   // 시각이 있으면 당연히 입실한 것이고, 시각이 없어도 페이지가 입실했다고
   // 하면(= "정상 출석" 문구) 그대로 믿는다.
@@ -755,6 +636,7 @@ async function handleAttendanceObserved(msg) {
 // 리마인더라 중복이 아니다). 대신 "같은 시각의 경고"는 하루에 한 번뿐이고,
 // 예정 시각을 한참 넘겨 울린 알람은 아예 보내지 않는다.
 async function handleMattermostWarning(totalMin) {
+  if ((await chrome.storage.local.get("accountPaused")).accountPaused) return;
   const skip = (why) => SsafyDebug.log("경고", `${hhmm(totalMin)} 경고 건너뜀`, { why });
 
   // 밀렸다가 뒤늦게 울린 알람은 여기서 끊는다. 이 검사가 없으면 절전에서
@@ -835,9 +717,9 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   if (details && details.reason === "install") openWelcome();
 });
 
-function openWelcome() {
+function openWelcome(reconnect = false) {
   try {
-    chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
+    chrome.tabs.create({ url: chrome.runtime.getURL(reconnect ? "welcome.html?reason=account-mismatch" : "welcome.html") });
   } catch (e) {
     /* 탭을 열 수 없는 상황이면 무시 (팝업에서 다시 열 수 있다) */
   }
@@ -970,6 +852,15 @@ async function checkAnnouncement(manual) {
 
 // 팝업/콘텐츠 스크립트 요청 처리
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.type === "activateAccount") {
+    if (!sender.url || !sender.url.startsWith(chrome.runtime.getURL(""))) {
+      sendResponse({ ok: false, error: "확장 설정 화면에서 연결해주세요." });
+      return false;
+    }
+    enqueueAttendance(() => applyAccountConnection(msg.connection)).then(sendResponse,
+      error => sendResponse({ ok: false, error: String(error.message || error) }));
+    return true;
+  }
   if (msg && msg.type === "checkUpdate") {
     checkAnnouncement(true).then(sendResponse);
     return true; // 비동기 응답
@@ -991,8 +882,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   // 팝업의 "사용법 다시 보기"
   if (msg && msg.type === "openWelcome") {
-    openWelcome();
+    openWelcome(msg.reconnect === true);
     sendResponse({ ok: true });
     return false;
   }
 });
+
+// 여러 탭의 계정 확인·출석 기록·전송을 순서대로 처리한다.
+let attendanceQueue = Promise.resolve();
+function enqueueAttendance(work) {
+  const result = attendanceQueue.then(work);
+  attendanceQueue = result.catch(() => {});
+  return result;
+}
+function handleAttendanceRecorded(msg) { return enqueueAttendance(() => recordAttendanceForAccount(msg)); }
+function handleAttendanceObserved(msg) { return enqueueAttendance(() => observeAttendanceForAccount(msg)); }

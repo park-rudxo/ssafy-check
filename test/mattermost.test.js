@@ -210,7 +210,8 @@ function loadWithServer(opts) {
       if (/^\/teams\/[^/]+\/channels\/name\/ssafy-attendance$/.test(path)) return json({ id: "c1" });
       if (path.startsWith("/hooks/incoming?")) {
         if (server.listStatus !== 200) return json({ message: "no" }, server.listStatus);
-        return json(server.hooks);
+        const teamId = new URLSearchParams(path.split("?")[1]).get("team_id");
+        return json(o.hooksByTeam ? o.hooksByTeam[teamId] || [] : server.hooks);
       }
       if (path === "/hooks/incoming" && method === "POST") {
         const body = JSON.parse(init.body);
@@ -476,4 +477,38 @@ test("여러 번 연결해도 웹훅이 하나로 유지된다", async () => {
   assert.equal(server.created.length, 1, "두 번째부터는 하나도 더 만들면 안 된다");
   assert.equal(second.reused, true);
   assert.equal(third.webhookUrl, first.webhookUrl, "매번 같은 웹훅이어야 한다");
+});
+
+
+test("자동 복구는 로그인한 본인의 기존 웹훅만 읽기 요청으로 가져온다", async () => {
+  const { MM, server } = loadWithServer({ me: { id: "u1", username: "hong", first_name: "홍길동" }, hooks: [myHook("h1")] });
+  const restored = await MM.restorePersonalWebhook("홍길동");
+  assert.equal(restored.userId, "u1");
+  assert.equal(restored.webhookUrl, "https://meeting.ssafy.com/hooks/h1");
+  assert.equal(server.created.length, 0);
+  assert.ok(server.calls.every(call => call.startsWith("GET ")));
+});
+
+test("SSAFY와 Mattermost 사용자가 다르면 웹훅을 조회하거나 만들지 않는다", async () => {
+  const { MM, server } = loadWithServer({ me: { id: "u1", username: "hong", first_name: "홍길동" }, hooks: [myHook("h1")] });
+  assert.equal(await MM.restorePersonalWebhook("김철수"), null);
+  assert.deepEqual(server.calls, ["GET /users/me"]);
+});
+
+test("자동 복구에 쓸 웹훅이 없거나 잠겨 있으면 새로 만들지 않는다", async () => {
+  for (const hooks of [[], [myHook("locked", { channel_locked: true })], [myHook("foreign", { user_id: "u2" })]]) {
+    const { MM, server } = loadWithServer({ me: { id: "u1", username: "hong", first_name: "홍길동" }, hooks });
+    assert.equal(await MM.restorePersonalWebhook("홍길동"), null);
+    assert.equal(server.created.length, 0);
+    assert.ok(server.calls.every(call => call.startsWith("GET ")));
+  }
+});
+
+test("자동 복구는 첫 팀에 웹훅이 없어도 다음 팀을 확인한다", async () => {
+  const { MM, server } = loadWithServer({ me: { id: "u1", username: "hong", first_name: "홍길동" }, teams: [{id:"t1"}, {id:"t2"}], hooksByTeam: {t1: [], t2: [myHook("h1")]} });
+  const original = MM.restorePersonalWebhook;
+  // 첫 팀에 웹훅이 없어도 두 번째 팀에서 찾는다.
+  const restored = await original("홍길동");
+  assert.equal(restored.webhookUrl, "https://meeting.ssafy.com/hooks/h1");
+  assert.ok(server.calls.some(call => call.includes("/teams/t2/")));
 });

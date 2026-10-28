@@ -50,7 +50,7 @@
 
   // 이 스크립트가 따라보는 저장소 키. 읽을 때와 바뀜을 볼 때가 갈라지면,
   // 새 키를 한쪽에만 넣어놓고 "설정을 바꿔도 화면이 안 바뀐다"를 만나게 된다.
-  const WATCHED_KEYS = ["ssafyDev", "dayOff", "mattermost", "eduAccount", "eduHandover"];
+  const WATCHED_KEYS = ["ssafyDev", "dayOff", "mattermost", "eduAccount", "eduHandover", "attendance", "accountPaused"];
 
   function loadDevSettings(cb) {
     try {
@@ -73,9 +73,17 @@
       if (!WATCHED_KEYS.some((k) => changes[k])) return;
       if (changes.ssafyDev) dev = { ...DEV_DEFAULTS, ...changes.ssafyDev.newValue };
       if (changes.dayOff) dayOff = { ...DAYOFF_DEFAULTS, ...changes.dayOff.newValue };
-      if (changes.mattermost) mm = changes.mattermost.newValue || null;
-      if (changes.eduAccount) eduAccount = changes.eduAccount.newValue || null;
+      if (changes.mattermost) {
+        mm = changes.mattermost.newValue || null;
+        lastReportedObserved = "";
+      }
+      if (changes.eduAccount) {
+        eduAccount = changes.eduAccount.newValue || null;
+        lastReportedObserved = "";
+      }
       if (changes.eduHandover) eduHandover = changes.eduHandover.newValue || null;
+      if (changes.attendance && !changes.attendance.newValue) lastReportedObserved = "";
+      if (changes.accountPaused && !changes.accountPaused.newValue) lastReportedObserved = "";
       update();
     });
   } catch (e) {
@@ -394,11 +402,11 @@
 
   // 오늘 이 PC를 정리했으면 그 사실을 알리는 문구. 아니면 빈 문자열.
   function handoverNotice() {
-    if (!eduHandover || eduHandover.date !== todayStr()) return "";
+    if (isMattermostConfigured() || !eduHandover || eduHandover.date !== todayStr()) return "";
     const from = eduHandover.from ? `${eduHandover.from}님의 ` : "";
     return (
       `🧹 이 크롬에 남아 있던 ${from}출석 알리미 설정을 정리했어요. ` +
-      `지금은 알림이 아무에게도 가지 않습니다 — 확장 아이콘을 눌러 내 계정으로 새로 연결하세요.`
+      `아래 버튼으로 내 계정을 연결하세요.`
     );
   }
 
@@ -628,7 +636,22 @@
       banner.id = BANNER_ID;
       document.body.appendChild(banner);
     }
-    banner.textContent = message;
+    if (banner.dataset.message !== message) {
+      banner.dataset.message = message;
+      banner.replaceChildren();
+      const text = document.createElement("span");
+      text.textContent = message;
+      banner.appendChild(text);
+      if (accountNotice || (mm && !isMattermostConfigured())) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "내 계정 연결";
+        button.addEventListener("click", () => {
+          chrome.runtime.sendMessage({ type: "openWelcome", reconnect: true });
+        });
+        banner.appendChild(button);
+      }
+    }
     banner.dataset.tone = tone; // "danger" | "warn"
     banner.style.display = "block";
   }
@@ -701,7 +724,9 @@
     try {
       const p = chrome.runtime.sendMessage(payload);
       // 서비스 워커가 없을 때 나는 "Receiving end does not exist"를 여기서 받는다.
-      if (p && typeof p.catch === "function") p.catch(retry);
+      if (p && typeof p.then === "function") p.then((result) => {
+        if (result && result.ok === false && onGiveUp) onGiveUp();
+      }, retry);
     } catch (e) {
       /* 확장 컨텍스트가 무효화된 경우 */
       retry(e);
@@ -728,6 +753,7 @@
       // 이 출석이 누구 것인지. 남의 PC에서 눌렀을 때 그 PC 주인에게 "완료"
       // 알림이 가는 것을 백그라운드에서 막기 위한 값이다.
       account: pageAccount(),
+      visible: document.visibilityState === "visible",
     });
   }
 
@@ -775,6 +801,7 @@
         checkoutMin,
         checkedIn,
         account: pageAccount(),
+      visible: document.visibilityState === "visible",
       },
       3,
       // 세 번 다 실패하면 "보냈다" 표시를 지운다. 그대로 두면 값이 바뀌기
@@ -898,7 +925,7 @@
     if (mm && !isMattermostConfigured()) {
       removeBox("checkin");
       removeBox("checkout");
-      showBanner("⚙️ 설정을 마쳐야 동작합니다. 확장 아이콘을 눌러 Mattermost 알림을 설정하세요.", "warn");
+      showBanner("⚙️ 출석 알림을 받으려면 내 계정을 연결하세요.", "warn");
       return;
     }
 
@@ -910,7 +937,7 @@
     const owner = otherOwnerName();
     if (!accountNotice) {
       accountNotice = owner
-        ? `👤 이 크롬에는 ${owner}님의 출석 알리미가 연결돼 있어요. 지금 로그인한 계정의 알림은 오지 않습니다 — 본인 크롬에 확장을 설치해 설정하세요.`
+        ? `👤 이 크롬에는 ${owner}님의 출석 알리미가 연결돼 있어요. Mattermost 웹에도 내 계정으로 로그인하면 기존 연결을 자동으로 찾습니다.`
         : "";
     }
 
@@ -1008,6 +1035,9 @@
   }
 
   // 주기 실행 + DOM 변경 감지
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") { lastReportedObserved = ""; update(); }
+  });
   syncServerTime(); // 페이지 로드 시 1회 보정
   setInterval(maybeSyncServerTime, 30 * 1000); // 입실/퇴실 마감 5분 전에만 재보정
   loadDevSettings(update);

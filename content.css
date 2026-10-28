@@ -58,17 +58,22 @@ body.ssafy-nav-open #ssafy-alert-banner {
 .ssafy-alert-box[data-tone="danger"] .ssafy-alert-box-label { background: #e53935; }
 .ssafy-alert-box[data-tone="warn"] .ssafy-alert-box-label { background: #fb8c00; }
 
-/* 상단 경고 배너 */
+/* 화면 오른쪽의 작은 알림 카드 */
 #ssafy-alert-banner {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
+  top: 16px;
+  right: 16px;
+  width: min(25vw, 320px);
+  min-width: min(220px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  border-radius: 10px;
   z-index: 2147483647;
   display: none;
-  padding: 12px 20px;
-  text-align: center;
-  font-size: 16px;
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.5;
   font-weight: 700;
   font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
   color: #fff;
@@ -77,7 +82,7 @@ body.ssafy-nav-open #ssafy-alert-banner {
 
 #ssafy-alert-banner[data-tone="danger"] {
   background: #e53935;
-  animation: ssafy-banner-blink 1.2s ease-in-out infinite;
+
 }
 
 #ssafy-alert-banner[data-tone="warn"] {
@@ -87,6 +92,19 @@ body.ssafy-nav-open #ssafy-alert-banner {
 @keyframes ssafy-banner-blink {
   0%, 100% { background: #e53935; }
   50% { background: #b71c1c; }
+}
+
+#ssafy-alert-banner button {
+  display: block;
+  margin-top: 8px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: #fff;
+  color: #7a3600;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 /* 안내 토스트 (18시 이전 퇴실 클릭 시) */

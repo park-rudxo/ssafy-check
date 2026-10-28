@@ -48,7 +48,7 @@ async function openPage({ mattermost, failFirst = 0 }) {
           dayOff: { offDays: [], workDays: [] },
           mattermost: ${JSON.stringify(mattermost)}
         }) },
-        onChanged: { addListener: () => {} }
+        onChanged: { addListener: (listener) => { window.__storageChanged = listener; } }
       },
       runtime: {
         // 실제 sendMessage 처럼 프라미스를 돌려준다. 잠든 서비스 워커는
@@ -120,4 +120,20 @@ test("보고가 실패하면 나중에 다시 보낸다", async () => {
   assert.equal(sent.length, 1, "세 번 실패한 뒤에도 다시 보고해야 한다");
   assert.equal(sent[0].checkedIn, true);
   await page.close();
+});
+
+
+test("재연결 후 값이 같은 출석 위젯도 다시 보고한다", async () => {
+  const { page } = await openPage({ mattermost: MM_DONE });
+  try {
+    await waitForReport(page, 5000);
+    const before = await page.evaluate(() => window.__sent.filter(m => m.type === "attendanceObserved").length);
+    assert.ok(before > 0);
+    await page.evaluate(() => window.__storageChanged({
+      mattermost: { newValue: { enabled: true, channel: "@newowner", webhookUrl: "https://meeting.ssafy.com/hooks/newowner" } },
+      attendance: { newValue: null }
+    }, "local"));
+    const after = await page.evaluate(() => window.__sent.filter(m => m.type === "attendanceObserved").length);
+    assert.ok(after > before, "계정 연결 후 같은 위젯을 재보고해야 경고 상태가 복구된다");
+  } finally { await page.close(); }
 });

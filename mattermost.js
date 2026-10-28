@@ -120,6 +120,7 @@
     try {
       res = await fetch(API_BASE + path, {
         method: verb,
+        signal: typeof AbortSignal !== "undefined" ? AbortSignal.timeout(10000) : undefined,
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
@@ -345,7 +346,7 @@
 
   // 연결 결과에서 계정 쪽 정보만 모은다.
   function meResult(me) {
-    return { channel: "@" + me.username, ownerNames: ownerNameHints(me) };
+    return { userId: me.id, channel: "@" + me.username, ownerNames: ownerNameHints(me) };
   }
 
   // 성공하면 { webhookUrl, channel, ownerNames, reused } 를 돌려준다.
@@ -400,6 +401,37 @@
     return { ...meResult(me), webhookUrl: hookUrl(hook.id), reused: false };
   }
 
+  // 자동 복구에서는 서버 데이터를 읽기만 한다. 새 웹훅은 연결 버튼에서만 만든다.
+  async function restorePersonalWebhook(eduName) {
+    if (!eduName) return null;
+    const me = await api("/users/me");
+    if (!me || !me.id || !me.username || !matchesOwnerName(ownerNameHints(me), eduName)) return null;
+    const teams = await api("/users/me/teams");
+    for (const team of Array.isArray(teams) ? teams : []) {
+      if (!team || !team.id || team.delete_at) continue;
+      try {
+        const channel = await api("/teams/" + team.id + "/channels/name/" + HOME_CHANNEL_NAME);
+        if (!channel || !channel.id) continue;
+        const hooks = await listMyHooks(team.id, me.id);
+        const hook = hooks.find(h => h.channel_id === channel.id && !h.channel_locked);
+        if (hook) return { ...meResult(me), webhookUrl: hookUrl(hook.id), reused: true };
+      } catch (error) {
+        dlog("자동 복구: 다음 팀 확인", { error: String(error.message || error) });
+      }
+    }
+    return null;
+  }
+
+  function activateConnection(connection) {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ type: "activateAccount", connection }, result => {
+        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+        if (!result || !result.ok) return reject(new Error(result && result.error || "연결 정보를 저장하지 못했어요."));
+        resolve(result);
+      });
+    });
+  }
+
   root.SsafyMattermost = {
     WEBHOOK_ORIGIN,
     HOME_URL,
@@ -408,6 +440,8 @@
     isConfigured,
     pickWebhookUrl,
     provisionPersonalWebhook,
+    restorePersonalWebhook,
+    activateConnection,
     cleanupMyWebhooks,
     hookIdOf,
     ownerNameHints,

@@ -61,7 +61,7 @@ async function openPage(dev, extra, util) {
           dayOff: { offDays: [], workDays: [] },
           ...${JSON.stringify(extra || {})}
         }) },
-        onChanged: { addListener: () => {} }
+        onChanged: { addListener: (listener) => { window.__storageChanged = listener; } }
       },
       runtime: { sendMessage: () => {} }
     };`,
@@ -266,7 +266,7 @@ test("설정을 정리한 날에는 그 사실을 배너로 알린다", async ()
     assert.equal(pageErrors.length, 0, "페이지 에러: " + pageErrors.join(" | "));
     assert.match(text, /정리했어요/, "왜 설정이 비어 있는지 알려줘야 한다");
     assert.match(text, /홍길동/, "누구 설정을 지웠는지 적어야 한다");
-    assert.match(text, /새로 연결/, "다음에 뭘 해야 하는지까지 알려줘야 한다");
+    assert.match(text, /내 계정을 연결/, "다음에 뭘 해야 하는지까지 알려줘야 한다");
     assert.equal((await page.$$(".ssafy-alert-box")).length, 1, "지금 앉은 사람도 입실은 눌러야 한다");
   } finally {
     await page.close();
@@ -420,8 +420,38 @@ test("웹훅이 없으면 - 강조 대신 설정 안내가 뜬다", async () => 
     });
     assert.equal(pageErrors.length, 0, "페이지 에러: " + pageErrors.join(" | "));
     assert.equal(state.boxes, 0, "설정 전에는 강조 박스를 그리지 않는다");
-    assert.match(state.bannerText, /설정을 마쳐야/, "설정 전에는 안내 배너가 떠야 한다");
+    assert.match(state.bannerText, /내 계정을 연결/, "설정 전에는 안내 배너가 떠야 한다");
   } finally {
     await page.close();
   }
+});
+
+
+test("자리 이동 후 재연결하면 안내가 사라지고 오른쪽 작은 카드의 버튼으로 연결한다", async () => {
+  const { page } = await openPage(
+    { checkedIn: "false", time: 8 * 60 + 30 },
+    { mattermost: { enabled: false }, eduHandover: { date: new Date().toLocaleDateString("en-CA"), from: "김철수" } }
+  );
+  try {
+    await page.addStyleTag({ path: path.join(ROOT, "content.css") });
+    await page.waitForTimeout(700);
+    const card = page.locator("#ssafy-alert-banner");
+    assert.equal(await card.locator("button").textContent(), "내 계정 연결");
+    const bounds = await card.boundingBox();
+    assert.ok(bounds.width <= 260, "카드는 화면 너비의 약 1/4");
+    assert.ok(bounds.x >= 700, "카드는 오른쪽에 배치");
+    await page.evaluate(() => {
+      window.__messages = [];
+      chrome.runtime.sendMessage = (message) => { window.__messages.push(message); return Promise.resolve({ok:true}); };
+    });
+    await card.locator("button").click();
+    assert.ok(await page.evaluate(() => window.__messages.some(m => m.type === "openWelcome")));
+    await page.evaluate(() => window.__storageChanged({
+      mattermost: { newValue: { enabled: true, channel: "@hong", webhookUrl: "https://meeting.ssafy.com/hooks/abcdefghijklmnopqrstuvwxyz", ownerNames: ["홍길동"] } },
+      eduAccount: { newValue: null }, eduHandover: { newValue: null }
+    }, "local"));
+    await page.waitForTimeout(700);
+    assert.doesNotMatch(await card.textContent(), /정리했어요|내 계정을 연결|연결돼 있어요/);
+    assert.equal(await card.locator("button").count(), 0);
+  } finally { await page.close(); }
 });

@@ -26,7 +26,7 @@
     if (reconnect) {
       const notice = document.createElement("p");
       notice.className = "sub";
-      notice.textContent = "에듀싸피 로그인 계정이 기존 연결 정보와 달라요. Mattermost 웹에서 내 계정으로 로그인한 뒤 ‘내 계정 연결하기’를 눌러주세요.";
+      notice.textContent = "자리 이동 시에는 Mattermost 웹에도 본인 계정으로 로그인하세요. 기존 연결은 자동으로 찾아옵니다. 이 Chrome 프로필에서 처음 쓰거나 자동 연결되지 않으면 아래 연결 버튼을 한 번 눌러주세요.";
       document.querySelector('[data-panel="1"]').prepend(notice);
     }
   }
@@ -130,6 +130,7 @@
         // 방금 연결한 이 계정으로 확정하기 위한 이름이다.
         mm = {
           ...mm,
+          userId: res.userId,
           webhookUrl: res.webhookUrl,
           channel: res.channel,
           ownerNames: Array.isArray(res.ownerNames) ? res.ownerNames : [],
@@ -139,12 +140,8 @@
         // 이 브라우저의 주인으로 기억해 다른 계정의 출석은 무시하는데(남의
         // 자리에서 로그인해 체크한 알림이 자리 주인에게 가던 문제), 계정을
         // 새로 연결한 순간부터는 그 사람이 주인이어야 한다.
-        try {
-          chrome.storage.local.remove("eduAccount");
-        } catch (e) {
-          /* 못 지워도 연결 자체는 끝났으므로 계속 진행한다 */
-        }
-        return save({ mattermost: mm }).then(() => {
+        return SsafyMattermost.activateConnection(res).then((saved) => {
+          mm = saved.mattermost;
           btn.disabled = false;
           renderMattermost();
           // 팝업과 같은 말을 해야 한다. 한쪽에만 적어두면, 설치 화면으로
@@ -155,6 +152,8 @@
               : `${res.channel} 로 연결했어요. 이제 테스트 메시지를 보내보세요.`,
             "ok"
           );
+
+          if (reconnect) show(3);
 
           // 출석 화면은 백그라운드가 연다. 설정이 저장되는 것을 보고 열기
           // 때문에, 여기서 팝업이 닫히더라도 주인 확정은 그대로 일어난다.

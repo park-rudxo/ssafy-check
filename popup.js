@@ -325,7 +325,9 @@
         return;
       }
       SsafyMattermost.provisionPersonalWebhook()
-        .then((res) => {
+        .then(async (res) => {
+          const saved = await SsafyMattermost.activateConnection(res);
+          mm.userId = res.userId;
           mm.webhookUrl = res.webhookUrl;
           mm.channel = res.channel;
           // 이 브라우저의 주인을 방금 연결한 계정으로 잡기 위한 이름이다.
@@ -333,11 +335,14 @@
           mm.ownerNames = Array.isArray(res.ownerNames) ? res.ownerNames : [];
           // 여기까지 왔으면 보낼 곳도 보낼 대상도 확정이다. 따로 켜게 두면
           // 연결만 해놓고 안 켠 상태로 남아 아무것도 안 오는 사람이 생긴다.
-          mm.enabled = true;
-          saveMattermost();
+          mm = saved.mattermost;
+          dayOff = saved.dayOff;
+          renderDayOff();
+          eduAccount = null;
+          renderMattermost();
+          renderEduOwner();
           // 계정을 새로 연결했다는 건 "이제부터 이 크롬은 내 것"이라는 뜻이다.
           // 예전 주인이 남아 있으면 새 주인의 출석이 전부 무시된다.
-          resetEduOwner();
           btn.disabled = false;
           cleanupArmed = false;
           renderHookCleanup("");
@@ -808,6 +813,12 @@
   // ── 초기화 ─────────────────────────────────────────────────────────
   function init() {
     bind();
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local") return;
+      if (changes.mattermost) { mm = { ...MM_DEFAULTS, ...changes.mattermost.newValue }; renderMattermost(); }
+      if (changes.eduAccount) { eduAccount = changes.eduAccount.newValue || null; renderEduOwner(); }
+      if (changes.dayOff) { dayOff = { ...DAYOFF_DEFAULTS, ...changes.dayOff.newValue }; renderDayOff(); }
+    });
     checkPendingReload();
     // 현재 버전 표시
     try {
